@@ -1,9 +1,109 @@
 
                   COWARD - The Crypto-Obscured Forwarder
 
-                Copyright (C) 2017 NI Rui <ranqus@gmail.com>
+                Copyright (C) 2017 Rui NI <ranqus@gmail.com>
 
 ================================================================================
 
-COWARD is a tool set that designed to make data exchange more easier and secure
-across challenging external environment.
+COWARD is a tool allowing you to transfer data secretly even when external env-
+ironment (i.e. Network) is challenging.
+
+With extendability in mind, this project also let you extend it with just few
+steps, so you can easily develop your own data wrap and obscure method without
+too many knowledge on network communication and programming.
+
+
+Status
+--------------------------------------------------------------------------------
+
+Before start to using this project, please checkout it's current status to make
+sure the version of your choice is healthy enough.
+
+ - Build status:
+   https://travis-ci.org/reinit/coward
+
+ - Unit Test coverage:
+   https://coveralls.io/github/reinit/coward
+
+
+Install
+--------------------------------------------------------------------------------
+
+To download and compile this project, please install Go programming language,
+then, on your console, type-in following commands:
+
+ > mkdir coward
+ > cd coward
+ > export GOPATH=$(pwd)
+ > go get -u github.com/reinit/coward
+
+If everything is working correctly, COWARD will be automatically downloaded and
+compiled for you.
+
+To get started, continue to type-in following commands in previous console:
+
+ > cd bin
+ > ./coward
+
+After that, a help screen will be displayed. Please follow those instructions to
+select and configure the feature which you like to use.
+
+
+Download binary file
+--------------------------------------------------------------------------------
+
+If you prefer, you can download automatically compiled object files and execute
+them directly on your computer.
+
+To download object file directly, please visit:
+https://github.com/reinit/coward/releases
+
+However, you must to understand that those object files was built automatically,
+none of it is verified by us, so we can't guarantee it's safety. You have to try
+it on your own risk.
+
+We recommend you to compile this application from source code by yourself so you
+can actually check if your distribution is secured.
+
+
+Continue Develop
+--------------------------------------------------------------------------------
+
+COWARD is designed to be extended. If you want to add new or alter existing
+features, please checkout those documents within program codes and the Wiki.
+
+If you decided to publish your own work which based on COWARD, please notice
+this project is released under GPL licence.
+
+Please also notice we will not accept Pull Requests except for those which
+intend to fix bugs. Please maintain your fork as if it is one of your own
+project and feel free to share it with others.
+
+
+Support
+--------------------------------------------------------------------------------
+
+            NOTICE: This is not a user-facing project, meaning
+            Help Support of this project is right next to none
+
+        Do not use this project if you don't have decent knowledge
+                        on how to use a computer.
+
+This project is completely a part-time hobby, thus only limited support will be
+provided:
+
+ - Code quality related issues:
+   Missing document, faulty comments, bad format and code style. Please point
+   out the bad code/doc (file name and line) in order to get it fixed.
+   Fix when free time ocurred
+
+ - Bugs, unexpected behaviors, design flaws
+   Please provide file name and line of the bad code to get it fixed.
+   Fix immediately
+
+ - Problem on extending or continue developing COWARD
+   I'm glad to help you with that. Although, adding new function to COWARD will
+   be something highly unlikely.
+
+Please notice if you can't provide any clue of the problem and you can't repro-
+duce the issue by yourself, your request will simpley be ingnored.
