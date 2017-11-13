@@ -22,6 +22,7 @@ package client
 
 import (
 	"errors"
+	"net"
 	"strconv"
 	"sync"
 	"time"
@@ -555,6 +556,25 @@ func (c *client) Close() error {
 
 	connectionConnected := c.connectionConnected
 	lastClosedConnection := transceiver.ConnectionID(0)
+	breakBlindClose := false
+
+	for !breakBlindClose {
+		select {
+		case cc := <-connectionConnected:
+			if cc.ID == lastClosedConnection {
+				connectionConnected <- cc
+				breakBlindClose = true
+			}
+
+			cc.Connection.Close()
+			cc.Closed = true
+
+			connectionConnected <- cc
+
+		default:
+			breakBlindClose = true
+		}
+	}
 
 	for c.connectionWorkers > 0 {
 		select {
@@ -618,18 +638,22 @@ func (c *client) request(
 	requestBuilder transceiver.RequestBuilder,
 	cancel <-chan struct{},
 	meter transceiver.Meter,
-) (bool, bool, error) {
+	log logger.Logger,
+) (bool, bool, logger.Logger, error) {
 	ch, chRetriable, chErr := c.getConnection(cancel, meter.Connection())
 
 	if chErr != nil {
 		meter.ConnectionFailure(chErr)
 
-		return chRetriable, false, chErr
+		return chRetriable, false, log, chErr
 	}
 
 	defer func() {
 		c.channel <- ch
 	}()
+
+	connLogger := log.Context("Connection (" +
+		strconv.FormatUint(uint64(ch.ID), 10) + ")")
 
 	meter.ConnectionFailure(nil)
 
@@ -650,12 +674,12 @@ func (c *client) request(
 	case <-ch.Closed:
 		time.Sleep(channelRefreshDelay)
 
-		return true, true, ErrRequestSelectedChannelIsUnavailable
+		return true, true, connLogger, ErrRequestSelectedChannelIsUnavailable
 
 	case <-ch.ConnClosed:
 		time.Sleep(channelRefreshDelay)
 
-		return true, true, ErrRequestSelectedChannelIsUnavailable
+		return true, true, connLogger, ErrRequestSelectedChannelIsUnavailable
 
 	default:
 	}
@@ -675,7 +699,7 @@ func (c *client) request(
 			ch.Channel.CloseAll()
 		}
 
-		return true, false, initErr
+		return true, false, connLogger, initErr
 	}
 
 	defer reqFSM.Shutdown()
@@ -697,24 +721,29 @@ func (c *client) request(
 			ch.Channel.CloseAll()
 		}
 
-		return false, false, handleErr
+		return false, false, connLogger, handleErr
 	}
 
-	return false, false, nil
+	return false, false, connLogger, nil
 }
 
 // Request sends request
 func (c *client) Request(
+	requester net.Addr,
 	requestBuilder transceiver.RequestBuilder,
 	cancel <-chan struct{},
 	meter transceiver.Meter,
 ) (bool, error) {
 	var retriable bool
 	var wontCount bool
+	var connLog logger.Logger
 	var err error
 
+	log := c.log.Context("Requesting").Context(requester.String())
+
 	for retried := uint8(0); retried < c.requestRetries; retried++ {
-		retriable, wontCount, err = c.request(requestBuilder, cancel, meter)
+		retriable, wontCount, connLog, err = c.request(
+			requestBuilder, cancel, meter, log)
 
 		if err == nil {
 			break
@@ -727,13 +756,13 @@ func (c *client) Request(
 		}
 
 		if !retriable {
-			c.log.Debugf("Request has failed due to error: %s. Given up",
+			connLog.Debugf("Request has failed due to error: %s. Given up",
 				err)
 
 			break
 		}
 
-		c.log.Debugf("Request has failed due to error: %s. Retrying (%d/%d)",
+		connLog.Debugf("Request has failed due to error: %s. Retrying (%d/%d)",
 			err, retried+1, c.requestRetries)
 	}
 

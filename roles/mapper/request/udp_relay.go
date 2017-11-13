@@ -50,6 +50,9 @@ var (
 	ErrUDPServerInitialUnknownError = errors.New(
 		"Remote has failed to initialize UDP mapping request due to an " +
 			"unknown error")
+
+	ErrUDPServerRelayFailed = errors.New(
+		"Remote Relay initialization has failed")
 )
 
 type udpRelay struct {
@@ -93,6 +96,9 @@ func (c udpRelay) Initialize(server relay.Server) error {
 
 	case request.UDPRespondInvalidRequest:
 		return ErrUDPServerInitialInvalidRequest
+
+	case byte(relay.SignalError):
+		return ErrUDPServerRelayFailed
 
 	default:
 		return ErrUDPServerInitialUnknownError

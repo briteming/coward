@@ -45,7 +45,8 @@ type Signal byte
 
 // Consts
 const (
-	SignalData      Signal = 0xFD
+	SignalData      Signal = 0xFC
+	SignalError     Signal = 0xFD
 	SignalCompleted Signal = 0xFE
 	SignalClose     Signal = 0xFF
 )
@@ -136,43 +137,13 @@ func (r *relay) Bootup(cancel <-chan struct{}) error {
 	// If there is any error happened after clientBuilder.Initialized,
 	// we have to sync the shutdown so the remote knows to release their
 	// end of relay
-	_, wErr := r.server.Write([]byte{byte(SignalCompleted)})
+	_, wErr := r.server.Write([]byte{byte(SignalError)})
 
 	if wErr != nil {
 		return wErr
 	}
 
-	wfcErr := r.waitForClose()
-
-	if wfcErr != nil {
-		return wfcErr
-	}
-
 	return runErr
-}
-
-func (r *relay) waitForClose() error {
-	exitResp := [1]byte{}
-
-	for {
-		_, crErr := io.ReadFull(r.server, exitResp[:])
-
-		if crErr != nil {
-			r.server.Done()
-
-			return crErr
-		}
-
-		r.server.Done()
-
-		if Signal(exitResp[0]) != SignalClose {
-			continue
-		}
-
-		break
-	}
-
-	return nil
 }
 
 // clientReceiver receives data from the client and send them to
@@ -235,8 +206,6 @@ func (r *relay) clientReceiver() error {
 			}
 
 			return rErr
-
-		default:
 		}
 	}
 }
@@ -296,6 +265,19 @@ func (r *relay) Tick() error {
 	switch Signal(signalID) {
 	case SignalData:
 		return nil //tickErr
+
+	case SignalError: // Remote relay encountered an error and already closed
+		select {
+		case r.initiativeClientDownSync <- struct{}{}:
+		default:
+		}
+
+		select {
+		case r.suppressClientDownSync <- struct{}{}:
+		default:
+		}
+
+		return r.Close()
 
 	case SignalCompleted: // Remote initialized shutdown
 		// If we are shutting down too, ignore the incomming

@@ -82,6 +82,7 @@ func (d udpClient) Serve() error {
 	}
 
 	_, reqErr := d.transceiver.Request(
+		d.conn.RemoteAddr(),
 		request.UDP(d.mapper, d.conn, d.runner, d.shb),
 		d.conn.Closed(), metering)
 

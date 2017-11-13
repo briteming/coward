@@ -27,5 +27,5 @@ func AutomaticalMinWorkerCount(maxWorkers uint32, rate uint32) uint32 {
 		return maxWorkers
 	}
 
-	return maxWorkers / rate
+	return rate + (maxWorkers / rate)
 }

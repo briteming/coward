@@ -47,6 +47,9 @@ var (
 
 	ErrTCPInitialRespondUnknownError = errors.New(
 		"Failed to establish TCP Mapping due to unknown error")
+
+	ErrTCPInitialRelayFailed = errors.New(
+		"Remote Relay has failed to be initialized")
 )
 
 type tcpRelay struct {
@@ -80,28 +83,21 @@ func (c tcpRelay) Initialize(server relay.Server) error {
 		return nil
 
 	case request.TCPRespondGeneralError:
-		c.client.Close()
-
 		return ErrTCPInitialRespondGeneralError
 
 	case request.TCPRespondMappingNotFound:
-		c.client.Close()
-
 		return ErrTCPInitialRespondTargetUndefined
 
 	case request.TCPRespondAccessDeined:
-		c.client.Close()
-
 		initError = ErrTCPInitialRespondAccessDeined
 
 	case request.TCPRespondUnreachable:
-		c.client.Close()
-
 		initError = ErrTCPInitialRespondTargetUnreachable
 
-	default:
-		c.client.Close()
+	case byte(relay.SignalError):
+		return ErrTCPInitialRelayFailed
 
+	default:
 		return ErrTCPInitialRespondUnknownError
 	}
 

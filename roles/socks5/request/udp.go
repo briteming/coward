@@ -63,6 +63,7 @@ func UDP(
 				runner:         runner,
 				cancel:         client.Closed(),
 				udpConn:        nil,
+				comfirmData:    nil,
 			}, make([]byte, 4096)),
 			cancel: client.Closed(),
 		}

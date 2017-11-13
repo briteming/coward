@@ -21,6 +21,7 @@
 package clients
 
 import (
+	"net"
 	"sort"
 	"time"
 
@@ -53,11 +54,12 @@ func (r *requester) Delay() timer.Timer {
 }
 
 func (r *requester) Request(
+	reqer net.Addr,
 	req transceiver.RequestBuilder,
 	cancel <-chan struct{},
 	m transceiver.Meter,
 ) (bool, error) {
-	return r.requester.Request(req, cancel, m)
+	return r.requester.Request(reqer, req, cancel, m)
 }
 
 func (r *requesters) Renew() {

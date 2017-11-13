@@ -51,6 +51,9 @@ var (
 	ErrUDPServerInvalidLocalAddr = errors.New(
 		"The UDP listening address is invalid")
 
+	ErrUDPServerRelayFailed = errors.New(
+		"Remote Relay failed to be initialized")
+
 	ErrUDPUnknownError = errors.New(
 		"Unknown UDP error")
 )
@@ -62,6 +65,7 @@ type udpRelay struct {
 	runner         corunner.Runner
 	cancel         <-chan struct{}
 	udpConn        io.ReadWriteCloser
+	comfirmData    []byte
 }
 
 func (u *udpRelay) Initialize(server relay.Server) error {
@@ -170,19 +174,19 @@ func (u *udpRelay) Initialize(server relay.Server) error {
 		udpPort[1] = byte((uint16(udpAddr.Port) << 8) >> 8)
 
 		if ipAddr := udpAddr.IP.To4(); ipAddr != nil {
-			rw.WriteFull(u.client, []byte{
+			u.comfirmData = []byte{
 				0x05, 0x00, 0x00, byte(common.ATypeIPv4),
 				ipAddr[0], ipAddr[1], ipAddr[2], ipAddr[3],
-				udpPort[0], udpPort[1]})
+				udpPort[0], udpPort[1]}
 
 			return nil
 		} else if ipAddr := udpAddr.IP.To16(); ipAddr != nil {
-			rw.WriteFull(u.client, []byte{
+			u.comfirmData = []byte{
 				0x05, 0x00, 0x00, byte(common.ATypeIPv6),
 				ipAddr[0], ipAddr[1], ipAddr[2], ipAddr[3], ipAddr[4],
 				ipAddr[5], ipAddr[6], ipAddr[7], ipAddr[8], ipAddr[9],
 				ipAddr[10], ipAddr[11], ipAddr[12], ipAddr[13], ipAddr[14],
-				ipAddr[15], udpPort[0], udpPort[1]})
+				ipAddr[15], udpPort[0], udpPort[1]}
 
 			return nil
 		}
@@ -197,11 +201,18 @@ func (u *udpRelay) Initialize(server relay.Server) error {
 
 		return ErrUDPInvalidRequest
 
+	case byte(relay.SignalError):
+		u.udpConn.Close()
+
+		return ErrUDPServerRelayFailed
+
 	default:
 		u.udpConn.Close()
 
 		return ErrUDPUnknownError
 	}
+
+	u.udpConn.Close()
 
 	server.SendSignal(relay.SignalCompleted, relay.SignalClose)
 
@@ -209,5 +220,11 @@ func (u *udpRelay) Initialize(server relay.Server) error {
 }
 
 func (u *udpRelay) Client(server relay.Server) (io.ReadWriteCloser, error) {
+	_, wErr := rw.WriteFull(u.client, u.comfirmData)
+
+	if wErr != nil {
+		return nil, wErr
+	}
+
 	return u.udpConn, nil
 }

@@ -82,6 +82,7 @@ func (d tcpClient) Serve() error {
 	d.conn.SetTimeout(d.timeout)
 
 	_, reqErr := d.transceiver.Request(
+		d.conn.RemoteAddr(),
 		request.TCP(d.mapper, d.conn, d.runner, d.shb),
 		d.conn.Closed(), metering)
 

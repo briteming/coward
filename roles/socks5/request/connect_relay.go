@@ -132,17 +132,6 @@ func (c connectRelay) Initialize(server relay.Server) error {
 
 	switch command[0] {
 	case request.TCPRespondOK:
-		// Tell client that we're ready
-		//
-		// +----+-----+-------+------+----------+----------+
-		// |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
-		// +----+-----+-------+------+----------+----------+
-		// | 1  |  1  | X'00' |  1   | Variable |    2     |
-		// +----+-----+-------+------+----------+----------+
-
-		rw.WriteFull(c.client, []byte{
-			0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
-
 		return nil
 
 	case request.TCPRespondGeneralError:
@@ -158,12 +147,15 @@ func (c connectRelay) Initialize(server relay.Server) error {
 		connectError = ErrConnectInitialRespondAccessDeined
 
 	case request.TCPRespondUnreachable:
-		rw.WriteFull(c.client, []byte{
-			0x05, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
-
 		connectError = ErrConnectInitialRespondTargetUnreachable
 
+	case byte(relay.SignalError):
+		return ErrConnectInitialRelayFailed
+
 	default:
+		rw.WriteFull(c.client, []byte{
+			0x05, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+
 		return ErrConnectInitialRespondUnknownError
 	}
 
@@ -174,5 +166,16 @@ func (c connectRelay) Initialize(server relay.Server) error {
 }
 
 func (c connectRelay) Client(server relay.Server) (io.ReadWriteCloser, error) {
+	// Tell client that we're ready
+	//
+	// +----+-----+-------+------+----------+----------+
+	// |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
+	// +----+-----+-------+------+----------+----------+
+	// | 1  |  1  | X'00' |  1   | Variable |    2     |
+	// +----+-----+-------+------+----------+----------+
+
+	rw.WriteFull(c.client, []byte{
+		0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+
 	return c.client, nil
 }

@@ -42,6 +42,9 @@ var (
 	ErrConnectInitialRespondUnknownError = errors.New(
 		"Unknown error for initial respond")
 
+	ErrConnectInitialRelayFailed = errors.New(
+		"Remote Relay has failed to initialize")
+
 	ErrConnectInitialRespondGeneralError = errors.New(
 		"Some error happened at the remote cause the request to fail")
 

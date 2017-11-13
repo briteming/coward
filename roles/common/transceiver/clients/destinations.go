@@ -22,6 +22,7 @@ package clients
 
 import (
 	"errors"
+	"net"
 	"sync"
 	"sync/atomic"
 
@@ -83,6 +84,7 @@ func (d *destinations) getDest(
 }
 
 func (d *destinations) Request(
+	reqer net.Addr,
 	dest transceiver.Destination,
 	req transceiver.BalancedRequestBuilder,
 	cancel <-chan struct{},
@@ -110,6 +112,8 @@ func (d *destinations) Request(
 				continue
 			}
 
+			continueLoop = false
+
 			m := &meter{
 				current:     destPriorities[dIdx],
 				requesters:  requesters,
@@ -117,17 +121,18 @@ func (d *destinations) Request(
 				lock:        lock,
 			}
 
-			retriable, reqErr := destPriorities[dIdx].requester.Request(func(
-				connectionID transceiver.ConnectionID,
-				server rw.ReadWriteDepleteDoner,
-				log logger.Logger,
-			) fsm.Machine {
-				return req(
-					destPriorities[dIdx].requester.ID(),
-					connectionID,
-					server,
-					log)
-			}, cancel, m)
+			retriable, reqErr := destPriorities[dIdx].requester.Request(
+				reqer, func(
+					connectionID transceiver.ConnectionID,
+					server rw.ReadWriteDepleteDoner,
+					log logger.Logger,
+				) fsm.Machine {
+					return req(
+						destPriorities[dIdx].requester.ID(),
+						connectionID,
+						server,
+						log)
+				}, cancel, m)
 
 			if reqErr == nil {
 				return nil

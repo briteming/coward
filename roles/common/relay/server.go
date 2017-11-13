@@ -65,10 +65,10 @@ func (c server) waitForRespond(expecting Signal) error {
 	return nil
 }
 
-// SendSignal sends a Relay Signal, and wait until expected respond are
-// received
+// SendSignalWaitRespond sends a Relay Signal, and wait until expected respond
+// are received
 func (c server) SendSignal(s Signal, expectingRespond Signal) error {
-	_, wErr := c.ReadWriteDepleteDoner.Write([]byte{
+	_, wErr := rw.WriteFull(c.ReadWriteDepleteDoner, []byte{
 		byte(s), byte(expectingRespond)})
 
 	if wErr != nil {
@@ -87,6 +87,8 @@ func (c server) Write(b []byte) (int, error) {
 
 	switch Signal(b[0]) {
 	case SignalData:
+		fallthrough
+	case SignalError:
 		fallthrough
 	case SignalCompleted:
 		fallthrough

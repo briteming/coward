@@ -196,7 +196,7 @@ func (d dummyRequestMachine) Ready(f fsm.FSM) error {
 
 func (d dummyRequestMachine) run(f fsm.FSM) error {
 	if d.Sleep {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	f.Shutdown()
@@ -262,11 +262,17 @@ func TestClientUpRequestThenDown(t *testing.T) {
 	}
 
 	for i := 0; i < 1000; i++ {
-		go serving.Request(dummyRequestBuilder(
+		go serving.Request(dummyAddr{
+			network: "",
+			address: "TEST",
+		}, dummyRequestBuilder(
 			true,
 		), nil, dummyMeter{})
 
-		go serving.Request(dummyRequestBuilder(
+		go serving.Request(dummyAddr{
+			network: "",
+			address: "TEST",
+		}, dummyRequestBuilder(
 			false,
 		), nil, dummyMeter{})
 	}
@@ -278,6 +284,19 @@ func TestClientUpRequestThenDown(t *testing.T) {
 
 		return
 	}
+}
+
+type dummyAddr struct {
+	network string
+	address string
+}
+
+func (d dummyAddr) Network() string {
+	return d.network
+}
+
+func (d dummyAddr) String() string {
+	return d.address
 }
 
 func BenchmarkClientRequest(b *testing.B) {
@@ -310,7 +329,10 @@ func BenchmarkClientRequest(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, reqErr := serving.Request(dummyRequestBuilder(
+		_, reqErr := serving.Request(dummyAddr{
+			network: "",
+			address: "TEST",
+		}, dummyRequestBuilder(
 			false,
 		), nil, dummyMeter{})
 

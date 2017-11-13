@@ -128,7 +128,8 @@ func (d client) Serve() error {
 	// Change to a longer timeout
 	d.conn.SetTimeout(d.timeout)
 
-	reqErr := d.transceiver.Request(destName, req, d.conn.Closed())
+	reqErr := d.transceiver.Request(
+		d.conn.RemoteAddr(), destName, req, d.conn.Closed())
 
 	if reqErr != nil {
 		d.logger.Warningf("Request has failed: %s", reqErr)

@@ -22,6 +22,7 @@ package clients
 
 import (
 	"errors"
+	"net"
 	"sync"
 	"time"
 
@@ -147,9 +148,11 @@ func (c *clients) Clients(r func(transceiver.ClientID, transceiver.Requester)) {
 }
 
 func (c *clients) Request(
+	reqer net.Addr,
 	dest transceiver.Destination,
 	req transceiver.BalancedRequestBuilder,
 	cancel <-chan struct{},
 ) error {
-	return c.destinations.Request(dest, req, cancel, &c.requesters, &c.bootLock)
+	return c.destinations.Request(
+		reqer, dest, req, cancel, &c.requesters, &c.bootLock)
 }
