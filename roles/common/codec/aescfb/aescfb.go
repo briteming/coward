@@ -126,9 +126,7 @@ func (a *aescfg) Read(b []byte) (int, error) {
 		}
 
 		a.decryptMarkerLock.Lock()
-
 		markErr := a.decryptMarker.Mark(marker.Mark(iv[:]))
-
 		a.decryptMarkerLock.Unlock()
 
 		if markErr != nil {
@@ -198,6 +196,13 @@ func (a *aescfg) Read(b []byte) (int, error) {
 	}
 
 	// Verify
+	_, wHMACSizeErr := a.decryptHMAC.Write( // Write Size in first
+		sizeBuf[:]) // so along the way we can verify that as well
+
+	if wHMACSizeErr != nil {
+		return 0, wHMACSizeErr
+	}
+
 	realHMACValue := [hmacLength]byte{}
 
 	_, realHMACErr := a.hmac(
@@ -242,6 +247,7 @@ func (a *aescfg) Write(b []byte) (int, error) {
 	hmacBuf := [hmacLength]byte{}
 	wStart := 0
 	maxPaddingLen := bLen
+	sizeBuf := [2]byte{}
 
 	if bLen > 256 {
 		maxPaddingLen = (bLen / 10) % math.MaxUint8
@@ -261,14 +267,22 @@ func (a *aescfg) Write(b []byte) (int, error) {
 			return wStart, insertErr
 		}
 
-		// Write HMAC
+		size := uint16(wEnd - wStart)
+
+		sizeBuf[0] = byte(size >> 8)
+		sizeBuf[1] = byte((size << 8) >> 8)
+
+		_, wHMACErr := a.encryptHMAC.Write(sizeBuf[:])
+
+		if wHMACErr != nil {
+			return wStart, wHMACErr
+		}
+
 		_, hmacErr := a.hmac(a.encryptHMAC, b[wStart:wEnd], hmacBuf[:])
 
 		if hmacErr != nil {
 			return wStart, hmacErr
 		}
-
-		var wLen int
 
 		_, wErr := rw.WriteFull(a.encrypter, hmacBuf[:])
 
@@ -277,12 +291,6 @@ func (a *aescfg) Write(b []byte) (int, error) {
 		}
 
 		// Write size
-		size := uint16(wEnd - wStart)
-		sizeBuf := [2]byte{}
-
-		sizeBuf[0] = byte(size >> 8)
-		sizeBuf[1] = byte((size << 8) >> 8)
-
 		_, wErr = rw.WriteFull(a.encrypter, sizeBuf[:])
 
 		if wErr != nil {
@@ -290,7 +298,7 @@ func (a *aescfg) Write(b []byte) (int, error) {
 		}
 
 		// Write data
-		wLen, wErr = rw.WriteFull(a.encrypter, b[wStart:wEnd])
+		_, wErr = rw.WriteFull(a.encrypter, b[wStart:wEnd])
 
 		if wErr != nil {
 			return wStart, wErr
@@ -303,7 +311,7 @@ func (a *aescfg) Write(b []byte) (int, error) {
 			return wStart, insertErr
 		}
 
-		wStart += wLen
+		wStart = wEnd
 	}
 
 	return wStart, nil

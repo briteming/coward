@@ -91,6 +91,9 @@ func (d *destinations) Request(
 	requesters *requesters,
 	lock *sync.RWMutex,
 ) error {
+	var retriable bool
+	var reqErr error
+
 	// Load destination record
 	lock.Lock()
 	dests := d.getDest(dest, requesters)
@@ -121,7 +124,7 @@ func (d *destinations) Request(
 				lock:        lock,
 			}
 
-			retriable, reqErr := destPriorities[dIdx].requester.Request(
+			retriable, reqErr = destPriorities[dIdx].requester.Request(
 				reqer, func(
 					connectionID transceiver.ConnectionID,
 					server rw.ReadWriteDepleteDoner,
@@ -150,6 +153,10 @@ func (d *destinations) Request(
 		}
 
 		continueLoop = false
+	}
+
+	if reqErr != nil {
+		return reqErr
 	}
 
 	return ErrDestinationsAllDestinationsHasFailed

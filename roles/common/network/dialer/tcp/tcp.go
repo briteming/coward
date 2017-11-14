@@ -70,7 +70,7 @@ func (d dialer) Dialer() network.Dial {
 	}
 }
 
-func (d dial) resolvedAddress() string {
+func (d *dial) resolvedAddress() string {
 	var address string
 
 	if d.resolved != nil && d.useResolved {
@@ -84,7 +84,7 @@ func (d dial) resolvedAddress() string {
 	return address
 }
 
-func (d dial) Dial() (network.Connection, error) {
+func (d *dial) Dial() (network.Connection, error) {
 	dialed, dialErr := net.DialTimeout("tcp", d.resolvedAddress(), d.timeout)
 
 	if dialErr != nil {
@@ -99,6 +99,6 @@ func (d dial) Dial() (network.Connection, error) {
 	return d.connWrapper(dialed), nil
 }
 
-func (d dial) String() string {
+func (d *dial) String() string {
 	return d.resolvedAddress()
 }

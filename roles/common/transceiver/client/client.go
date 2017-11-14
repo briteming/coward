@@ -238,6 +238,8 @@ func (c *client) connect(
 			if cc.ID != connectionID {
 				c.connectionConnected <- cc
 
+				time.Sleep(channelRefreshDelay)
+
 				continue
 			}
 
@@ -306,6 +308,8 @@ func (c *client) connect(
 			// https://golang.org/ref/spec#Channel_types
 			if ch.ID != connectionID {
 				c.channel <- ch
+
+				time.Sleep(channelRefreshDelay)
 
 				continue
 			}
@@ -564,6 +568,8 @@ func (c *client) Close() error {
 			if cc.ID == lastClosedConnection {
 				connectionConnected <- cc
 				breakBlindClose = true
+
+				continue
 			}
 
 			cc.Connection.Close()

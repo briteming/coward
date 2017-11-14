@@ -41,7 +41,9 @@ func main() {
 		URL:       "",
 		Components: application.Components{
 			proxy.Role, socks5.Role, mapper.Role,
-			codec.Plain, codec.AESCFB128, codec.AESCFB256,
+			codec.Plain,
+			codec.AESCFB128, codec.AESCFB256,
+			codec.AESGCM128, codec.AESGCM256,
 		},
 	})
 

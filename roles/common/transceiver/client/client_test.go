@@ -89,7 +89,11 @@ func (d *dummyConnection) LocalAddr() net.Addr {
 }
 
 func (d *dummyConnection) Read(b []byte) (int, error) {
-	r := <-d.reading
+	r, ok := <-d.reading
+
+	if !ok {
+		return 0, io.EOF
+	}
 
 	return copy(b, r.Data), r.Error
 }
@@ -100,11 +104,6 @@ func (d *dummyConnection) Close() error {
 		return io.EOF
 
 	default:
-		d.reading <- dummyConnReading{
-			Data:  nil,
-			Error: io.EOF,
-		}
-
 		close(d.reading)
 	}
 
@@ -125,8 +124,8 @@ func TestClientUpDown(t *testing.T) {
 	c := New(0, log, dialer, testDummyEncodec, Config{
 		MaxConcurrent:        100,
 		RequestRetries:       10,
-		InitialTimeout:       10 * time.Second,
-		IdleTimeout:          10 * time.Second,
+		InitialTimeout:       1 * time.Second,
+		IdleTimeout:          3 * time.Second,
 		ConnectionPersistent: false,
 		ConnectionChannels:   16,
 	})
@@ -163,7 +162,7 @@ func TestClientUpDown(t *testing.T) {
 		return
 	}
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 300; i++ {
 		served, servErr = c.Serve()
 
 		if servErr != nil {
@@ -247,8 +246,8 @@ func TestClientUpRequestThenDown(t *testing.T) {
 	c := New(0, log, dialer, testDummyEncodec, Config{
 		MaxConcurrent:        16,
 		RequestRetries:       10,
-		InitialTimeout:       10 * time.Second,
-		IdleTimeout:          10 * time.Second,
+		InitialTimeout:       1 * time.Second,
+		IdleTimeout:          3 * time.Second,
 		ConnectionPersistent: false,
 		ConnectionChannels:   16,
 	})
@@ -261,7 +260,7 @@ func TestClientUpRequestThenDown(t *testing.T) {
 		return
 	}
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 30; i++ {
 		go serving.Request(dummyAddr{
 			network: "",
 			address: "TEST",

@@ -18,7 +18,7 @@
 //  along with Crypto-Obscured Forwarder. If not, see
 //  <http://www.gnu.org/licenses/>.
 
-package aescfb
+package aesgcm
 
 import (
 	"bytes"
@@ -63,7 +63,7 @@ func TestAESCFB(t *testing.T) {
 
 	buf := bytes.NewBuffer(make([]byte, 0, 512))
 
-	codec, codecErr := AESCFB(buf, k, 32, dummyMark{}, &sync.Mutex{})
+	codec, codecErr := AESGCM(buf, k, 32, dummyMark{}, &sync.Mutex{})
 
 	if codecErr != nil {
 		t.Error("Failed to initialize codec:", codecErr)
@@ -80,10 +80,6 @@ func TestAESCFB(t *testing.T) {
 
 		return
 	}
-
-	expected := make([]byte, len(testData))
-
-	copy(expected, testData)
 
 	wLen, wErr := codec.Write(testData)
 
@@ -117,9 +113,9 @@ func TestAESCFB(t *testing.T) {
 		return
 	}
 
-	if !bytes.Equal(resultData, expected) {
+	if !bytes.Equal(resultData, testData) {
 		t.Errorf("Reading invalid data. Expecting %d, got %d",
-			expected, resultData)
+			testData, resultData)
 
 		return
 	}

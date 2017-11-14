@@ -312,6 +312,9 @@ func (c *channelize) For(id ch.ID) Virtual {
 
 // Shutdown closes all underlaying Virtual Channels
 func (c *channelize) Shutdown() error {
+	c.channelsLock.Lock()
+	defer c.channelsLock.Unlock()
+
 	select {
 	case c.downIgniter <- struct{}{}:
 		downIgniter := c.downIgniter
@@ -326,9 +329,6 @@ func (c *channelize) Shutdown() error {
 	default:
 		return ErrChannelShuttedDown
 	}
-
-	c.channelsLock.Lock()
-	defer c.channelsLock.Unlock()
 
 	for cIdx := range c.channels {
 		if c.channels[cIdx] == nil {
