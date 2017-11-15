@@ -23,7 +23,6 @@ package clients
 import (
 	"net"
 	"sort"
-	"time"
 
 	"github.com/reinit/coward/common/timer"
 	"github.com/reinit/coward/roles/common/transceiver"
@@ -37,8 +36,7 @@ type requester struct {
 }
 
 type requesters struct {
-	req        []*requester
-	lastUpdate time.Time
+	req []*requester
 }
 
 func (r *requester) Sink(s bool) {
@@ -68,12 +66,6 @@ func (r *requesters) Renew() {
 	}
 
 	sort.Sort(r)
-
-	r.lastUpdate = time.Now()
-}
-
-func (r *requesters) Updated() time.Time {
-	return r.lastUpdate
 }
 
 func (r *requesters) Outdated() bool {

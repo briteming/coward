@@ -24,7 +24,6 @@ import (
 	"errors"
 	"net"
 	"sync"
-	"time"
 
 	"github.com/reinit/coward/common/timer"
 	"github.com/reinit/coward/roles/common/transceiver"
@@ -52,8 +51,7 @@ func New(clis []transceiver.Client, maxDestinations int) transceiver.Balancer {
 	return &clients{
 		clients: clis,
 		requesters: requesters{
-			req:        make([]*requester, len(clis)),
-			lastUpdate: time.Time{},
+			req: make([]*requester, len(clis)),
 		},
 		destinations: destinations{
 			dest: make(

@@ -139,6 +139,7 @@ type client struct {
 	totalChannels       uint32
 	connectionConnect   chan connectRequest
 	connectionConnected chan connectedConnection
+	connectionFree      chan struct{}
 	connectionWait      sync.WaitGroup
 	connectionWorkers   uint32
 	lastConnectionID    transceiver.ConnectionID
@@ -180,6 +181,7 @@ func New(
 		totalChannels:       0,
 		connectionConnect:   make(chan connectRequest),
 		connectionConnected: make(chan connectedConnection, cfg.MaxConcurrent),
+		connectionFree:      make(chan struct{}),
 		connectionWait:      sync.WaitGroup{},
 		connectionWorkers:   0,
 		lastConnectionID:    0,
@@ -399,27 +401,21 @@ func (c *client) connection(
 	}()
 
 	dial := d.Dialer.Dialer()
-	closing := false
 
 	for {
 		select {
 		case ready <- struct{}{}:
 			ready = nil // Replace local value to nil
 
+		case <-c.connectionFree:
+			// Do nothing
+
 		case req := <-c.connectionConnect:
 			if req.Exit {
-				closing = true
-
 				req.Result <- connectRequestResult{
 					ID:    id,
 					Error: nil,
 				}
-
-				return
-			}
-
-			if closing {
-				log.Infof("Closing. All Request are denied")
 
 				return
 			}
@@ -585,8 +581,10 @@ func (c *client) Close() error {
 	for c.connectionWorkers > 0 {
 		select {
 		case cc := <-connectionConnected:
-			cc.Connection.Close()
-			cc.Closed = true
+			if !cc.Closed {
+				cc.Connection.Close()
+				cc.Closed = true
+			}
 
 			lastClosedConnection = cc.ID
 			connectionConnected <- cc
@@ -625,6 +623,18 @@ func (c *client) Connections() uint32 {
 // client
 func (c *client) Channels() uint32 {
 	return c.totalChannels
+}
+
+// Full returns whether or not the Client is fully connected, that means
+// max amount of connection is established with the remote server
+func (c *client) Full() bool {
+	select {
+	case c.connectionFree <- struct{}{}:
+		return false
+
+	default:
+		return true
+	}
 }
 
 // Available check if there are free Channels for request

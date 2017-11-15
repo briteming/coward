@@ -191,14 +191,6 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 			}).Serve()
 
 		default:
-			for sIdx := range s.servers {
-				if s.servers[sIdx] == nil {
-					break
-				}
-
-				s.servers[sIdx].Close()
-			}
-
 			return ErrUnknownNetProtoType
 		}
 
@@ -209,7 +201,7 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 					strconv.FormatUint(uint64(
 						s.cfg.Mapping[mIdx].Port), 10)))
 
-			continue
+			return serveErr
 		}
 
 		s.servers[startedServer] = serving
@@ -240,10 +232,11 @@ func (s *mapper) Unspawn() error {
 	// Then, close all servers
 	for sIdx := range s.servers {
 		if s.servers[sIdx] == nil {
-			break
+			continue
 		}
 
 		s.servers[sIdx].Close()
+		s.servers[sIdx] = nil
 	}
 
 	// Close runner at last

@@ -83,7 +83,13 @@ func (c *tcpIPv4) Bootup() (fsm.State, error) {
 
 	timeout := time.Duration(c.buf[6]) * time.Second
 
-	if timeout == 0 || timeout > c.dialTimeout {
+	if timeout <= 0 {
+		c.rw.Write([]byte{TCPRespondBadRequest})
+
+		return nil, ErrTCPInvalidTimeout
+	}
+
+	if timeout > c.dialTimeout {
 		timeout = c.dialTimeout
 	}
 

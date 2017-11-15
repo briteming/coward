@@ -58,7 +58,16 @@ func (c connectRelay) Initialize(server relay.Server) error {
 
 	portTimeoutBytes[0] = byte(c.addr.Port >> 8)
 	portTimeoutBytes[1] = byte((c.addr.Port << 8) >> 8)
-	portTimeoutBytes[2] = byte((c.requestTimeout / 2).Seconds())
+
+	reqTimeout := (c.requestTimeout / 2).Seconds()
+
+	if reqTimeout > math.MaxUint8 {
+		reqTimeout = math.MaxUint8
+	} else if reqTimeout < 1 {
+		reqTimeout = 1
+	}
+
+	portTimeoutBytes[2] = byte(reqTimeout)
 
 	switch c.addr.AType {
 	case common.ATypeIPv4:
@@ -142,6 +151,9 @@ func (c connectRelay) Initialize(server relay.Server) error {
 
 	case request.TCPRespondUnreachable:
 		connectError = ErrConnectInitialRespondTargetUnreachable
+
+	case request.TCPRespondBadRequest:
+		return ErrConnectInitialFailedBadRequest
 
 	case byte(relay.SignalError):
 		return ErrConnectInitialRelayFailed

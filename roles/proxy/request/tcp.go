@@ -35,6 +35,9 @@ import (
 var (
 	ErrTCPLocalAccessDeined = errors.New(
 		"Local access deined")
+
+	ErrTCPInvalidTimeout = errors.New(
+		"Invalid TCP dial timeout")
 )
 
 // Respond ID
@@ -44,6 +47,7 @@ const (
 	TCPRespondGeneralError    = 0x03
 	TCPRespondAccessDeined    = 0x04
 	TCPRespondMappingNotFound = 0x05
+	TCPRespondBadRequest      = 0x06
 )
 
 // TCP request
