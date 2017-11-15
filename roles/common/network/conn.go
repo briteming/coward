@@ -25,10 +25,14 @@ import (
 	"time"
 )
 
+// ConnectionID is the UID of current connection
+type ConnectionID string
+
 // Connection is a network connection
 type Connection interface {
 	net.Conn
 
+	ID() ConnectionID
 	SetTimeout(timeout time.Duration)
 	SetReadTimeout(timeout time.Duration)
 	SetWriteTimeout(timeout time.Duration)

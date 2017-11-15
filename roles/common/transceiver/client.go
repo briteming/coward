@@ -52,6 +52,7 @@ type Balancer interface {
 type Requester interface {
 	ID() ClientID
 	Available() bool
+	Full() bool
 	Request(
 		requester net.Addr,
 		req RequestBuilder,

@@ -54,6 +54,9 @@ var (
 	ErrConnectInitialRespondTargetUnreachable = errors.New(
 		"Remote has failed to connect to the specified host")
 
+	ErrConnectInitialFailedBadRequest = errors.New(
+		"Remote has failed to initialize due to an invalid request")
+
 	ErrConnectInvalidExchangeRespond = errors.New(
 		"Invalid exchange respond")
 )

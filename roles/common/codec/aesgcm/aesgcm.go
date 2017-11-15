@@ -182,6 +182,8 @@ func (a *aesgcm) Read(b []byte) (int, error) {
 		return 0, ErrInvalidSizeDataLength
 	}
 
+	a.nonceIncreament(a.decryptNonceBuf[:])
+
 	size := uint16(0)
 
 	size |= uint16(sizeData[0])
@@ -219,6 +221,8 @@ func (a *aesgcm) Read(b []byte) (int, error) {
 		if paddingOpenErr != nil {
 			return 0, paddingOpenErr
 		}
+
+		a.nonceIncreament(a.decryptNonceBuf[:])
 	}
 
 	actualCipherTextReadLen := a.decrypter.Overhead() + int(size)
@@ -245,6 +249,7 @@ func (a *aesgcm) Read(b []byte) (int, error) {
 	}
 
 	a.nonceIncreament(a.decryptNonceBuf[:])
+
 	a.decryptReader = bytes.NewReader(dataData)
 
 	return a.decryptReader.Read(b)
@@ -297,6 +302,8 @@ func (a *aesgcm) Write(b []byte) (int, error) {
 			return start, wErr
 		}
 
+		a.nonceIncreament(a.encrypterNonceBuf[:])
+
 		// Notice the padding may not apply to the data block at all
 		if sizeBuf[2] > 0 {
 			_, rErr := rand.Read(a.encrypterPaddingBuf[:sizeBuf[2]])
@@ -319,6 +326,8 @@ func (a *aesgcm) Write(b []byte) (int, error) {
 			} else {
 				sizeBuf[2] = 0
 			}
+
+			a.nonceIncreament(a.encrypterNonceBuf[:])
 		} else {
 			_, paddingSizeReadErr := rand.Read(sizeBuf[2:])
 

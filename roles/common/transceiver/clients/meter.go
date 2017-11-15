@@ -36,17 +36,15 @@ type meter struct {
 }
 
 type meterConnectionStopper struct {
-	requester  *requester
 	requesters *requesters
 	stopper    timer.Stopper
 	lock       *sync.RWMutex
 }
 
 type meterRequestStopper struct {
-	dest       *destination
-	requesters *requesters
-	stopper    timer.Stopper
-	lock       *sync.RWMutex
+	dest    *destination
+	stopper timer.Stopper
+	lock    *sync.RWMutex
 }
 
 func (m meterConnectionStopper) Stop() time.Duration {
@@ -73,14 +71,13 @@ func (m meterRequestStopper) Stop() time.Duration {
 		return duration
 	}
 
-	m.dest.Renew(m.requesters)
+	m.dest.Renew()
 
 	return duration
 }
 
 func (m *meter) Connection() timer.Stopper {
 	return meterConnectionStopper{
-		requester:  m.current.requester,
 		requesters: m.requesters,
 		stopper:    m.current.requester.Delay().Start(),
 		lock:       m.lock,
@@ -102,9 +99,8 @@ func (m *meter) ConnectionFailure(e error) {
 
 func (m *meter) Request() timer.Stopper {
 	return meterRequestStopper{
-		requesters: m.requesters,
-		dest:       m.destination,
-		stopper:    m.current.Delay().Start(),
-		lock:       m.lock,
+		dest:    m.destination,
+		stopper: m.current.Delay().Start(),
+		lock:    m.lock,
 	}
 }

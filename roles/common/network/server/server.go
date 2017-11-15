@@ -363,7 +363,7 @@ func (a *server) worker(id uint64, ready chan<- struct{}) error {
 func (a *server) acceptor(id uint64, killChan chan kill) error {
 	log := a.logger.Context("Acceptor (" + strconv.FormatUint(id, 10) + ")")
 	leave := make(chan network.Connection)
-	clients := make(map[string]client, a.cfg.MaxWorkers)
+	clients := make(map[network.ConnectionID]client, a.cfg.MaxWorkers)
 	workerCreationWaiter := make(chan struct{})
 	killed := false
 
@@ -391,14 +391,13 @@ func (a *server) acceptor(id uint64, killChan chan kill) error {
 				continue
 			}
 
-			remoteAddr := acc.Conn.RemoteAddr().String()
 			giveup := false
 			workerCreationRequested := false
 
 			for !giveup {
 				select {
 				case a.pick <- pick{Conn: acc.Conn, Leave: leave}:
-					clients[remoteAddr] = client{
+					clients[acc.Conn.ID()] = client{
 						Conn:   acc.Conn,
 						Closed: false,
 					}
@@ -407,7 +406,8 @@ func (a *server) acceptor(id uint64, killChan chan kill) error {
 
 					acc.Result <- nil
 
-					log.Debugf("New connection from \"%s\"", remoteAddr)
+					log.Debugf("New connection from \"%s\"",
+						acc.Conn.RemoteAddr().String())
 
 				default:
 					if !workerCreationRequested {
@@ -424,16 +424,17 @@ func (a *server) acceptor(id uint64, killChan chan kill) error {
 			}
 
 		case leave := <-leave:
-			remoteAddr := leave.RemoteAddr().String()
-			requireClose := !clients[remoteAddr].Closed
+			remoteConnID := leave.ID()
+			requireClose := !clients[remoteConnID].Closed
 
-			delete(clients, remoteAddr)
+			delete(clients, remoteConnID)
 
 			if requireClose {
 				leave.Close()
 			}
 
-			log.Debugf("Connection to \"%s\" is closed", remoteAddr)
+			log.Debugf("Connection to \"%s\" is closed",
+				leave.RemoteAddr().String())
 
 		case kil := <-killChan:
 			killed = true
@@ -444,7 +445,8 @@ func (a *server) acceptor(id uint64, killChan chan kill) error {
 
 				clients[n] = v
 
-				log.Debugf("Connection to \"%s\" has been closed", n)
+				log.Debugf("Connection to \"%s\" has been closed",
+					v.Conn.RemoteAddr())
 			}
 
 			kil.Done <- struct{}{}

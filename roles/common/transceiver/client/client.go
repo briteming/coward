@@ -42,7 +42,7 @@ const (
 	maxChannels = uint32(channel.MaxChannels)
 
 	requestWaitTickTime = 300 * time.Millisecond
-	channelRefreshDelay = 300 * time.Millisecond
+	channelRefreshDelay = 50 * time.Millisecond
 )
 
 // Errors
@@ -139,6 +139,7 @@ type client struct {
 	totalChannels       uint32
 	connectionConnect   chan connectRequest
 	connectionConnected chan connectedConnection
+	connectionFree      chan struct{}
 	connectionWait      sync.WaitGroup
 	connectionWorkers   uint32
 	lastConnectionID    transceiver.ConnectionID
@@ -180,6 +181,7 @@ func New(
 		totalChannels:       0,
 		connectionConnect:   make(chan connectRequest),
 		connectionConnected: make(chan connectedConnection, cfg.MaxConcurrent),
+		connectionFree:      make(chan struct{}),
 		connectionWait:      sync.WaitGroup{},
 		connectionWorkers:   0,
 		lastConnectionID:    0,
@@ -399,27 +401,21 @@ func (c *client) connection(
 	}()
 
 	dial := d.Dialer.Dialer()
-	closing := false
 
 	for {
 		select {
 		case ready <- struct{}{}:
 			ready = nil // Replace local value to nil
 
+		case <-c.connectionFree:
+			// Do nothing
+
 		case req := <-c.connectionConnect:
 			if req.Exit {
-				closing = true
-
 				req.Result <- connectRequestResult{
 					ID:    id,
 					Error: nil,
 				}
-
-				return
-			}
-
-			if closing {
-				log.Infof("Closing. All Request are denied")
 
 				return
 			}
@@ -548,6 +544,8 @@ func (c *client) Close() error {
 		return ErrAlreadyClosed
 	}
 
+	c.log.Debugf("Closing")
+
 	// Ticker down
 	c.requestWaitTicker.Stop()
 
@@ -559,15 +557,13 @@ func (c *client) Close() error {
 	}
 
 	connectionConnected := c.connectionConnected
-	lastClosedConnection := transceiver.ConnectionID(0)
-	breakBlindClose := false
 
-	for !breakBlindClose {
+	for c.connectionWorkers > 0 {
 		select {
 		case cc := <-connectionConnected:
-			if cc.ID == lastClosedConnection {
+			if cc.Closed {
 				connectionConnected <- cc
-				breakBlindClose = true
+				connectionConnected = nil
 
 				continue
 			}
@@ -577,35 +573,22 @@ func (c *client) Close() error {
 
 			connectionConnected <- cc
 
-		default:
-			breakBlindClose = true
-		}
-	}
-
-	for c.connectionWorkers > 0 {
-		select {
-		case cc := <-connectionConnected:
-			cc.Connection.Close()
-			cc.Closed = true
-
-			lastClosedConnection = cc.ID
-			connectionConnected <- cc
-			connectionConnected = nil
-
 		case c.connectionConnect <- connectExitReq:
-			rr := <-connectExitReq.Result
+			<-connectExitReq.Result
 
-			if rr.ID == lastClosedConnection && connectionConnected == nil {
-				connectionConnected = c.connectionConnected
-			}
+			connectionConnected = c.connectionConnected
 
 			c.connectionWorkers--
 		}
 	}
 
+	c.log.Debugf("Waiting for all connection handler to quit")
+
 	c.connectionWait.Wait()
 
 	c.booted = false
+
+	c.log.Debugf("Closed")
 
 	return nil
 }
@@ -625,6 +608,18 @@ func (c *client) Connections() uint32 {
 // client
 func (c *client) Channels() uint32 {
 	return c.totalChannels
+}
+
+// Full returns whether or not the Client is fully connected, that means
+// max amount of connection is established with the remote server
+func (c *client) Full() bool {
+	select {
+	case c.connectionFree <- struct{}{}:
+		return false
+
+	default:
+		return true
+	}
 }
 
 // Available check if there are free Channels for request

@@ -75,12 +75,20 @@ func (c *connection) setDropped() {
 	defer c.closeLock.Unlock()
 
 	select {
-	case <-c.close:
-		return
+	case _, ok := <-c.close:
+		if !ok {
+			return
+		}
 
 	default:
-		close(c.close)
 	}
+
+	close(c.close)
+}
+
+func (c *connection) ID() network.ConnectionID {
+	return network.ConnectionID(
+		c.LocalAddr().String() + "-" + c.RemoteAddr().String())
 }
 
 func (c *connection) SetTimeout(t time.Duration) {

@@ -100,7 +100,11 @@ func (d *dummyConnection) Read(b []byte) (int, error) {
 
 func (d *dummyConnection) Close() error {
 	select {
-	case <-d.reading:
+	case _, ok := <-d.reading:
+		if ok {
+			close(d.reading)
+		}
+
 		return io.EOF
 
 	default:

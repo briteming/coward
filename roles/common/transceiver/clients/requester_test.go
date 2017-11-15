@@ -67,8 +67,7 @@ func TestRequester(t *testing.T) {
 	}
 
 	reqs := requesters{
-		req:        []*requester{requester1, requester2, requester3},
-		lastUpdate: time.Time{},
+		req: []*requester{requester1, requester2, requester3},
 	}
 
 	reqs.Renew()
