@@ -32,3 +32,43 @@ type Codec struct {
 	Build  func(configuration []byte) CodecBuilder
 	Verify func(configuration []byte) error
 }
+
+// CodecError is the error of codec
+type CodecError interface {
+	error
+	Type() CodecError
+}
+
+type codecError struct {
+	err string
+}
+
+func (c codecError) Error() string {
+	return "Transceiver Codec Error: " + c.err
+}
+
+func (c codecError) Type() CodecError {
+	return c
+}
+
+type codecErrorWrapper struct {
+	err error
+}
+
+func (c codecErrorWrapper) Error() string {
+	return "Transceiver Codec Error: " + c.err.Error()
+}
+
+func (c codecErrorWrapper) Type() CodecError {
+	return c
+}
+
+// NewCodecError creates a new codec error
+func NewCodecError(msg string) CodecError {
+	return codecError{err: msg}
+}
+
+// WrapCodecError wraps an error as a codec error
+func WrapCodecError(err error) CodecError {
+	return codecErrorWrapper{err: err}
+}

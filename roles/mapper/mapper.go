@@ -110,7 +110,7 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 	runner, runnerServeErr := corunner.New(s.log, corunner.Config{
 		MaxWorkers: trServe.Channels(),
 		MinWorkers: pcommon.AutomaticalMinWorkerCount(
-			trServe.Channels(), 3000),
+			trServe.Channels(), 128),
 		MaxWorkerIdle:     s.cfg.TransceiverIdleTimeout * 10,
 		JobReceiveTimeout: s.cfg.TransceiverInitialTimeout,
 	}).Serve()
@@ -136,8 +136,8 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		switch s.cfg.Mapping[mIdx].Protocol {
 		case network.TCP:
 			serving, serveErr = server.New(tcplistener.New(
-				s.cfg.Mapping[mIdx].ListenInterface,
-				s.cfg.Mapping[mIdx].ListenPort,
+				s.cfg.Mapping[mIdx].Interface,
+				s.cfg.Mapping[mIdx].Port,
 				s.cfg.TransceiverInitialTimeout,
 				tcpconn.Wrap,
 			), tcpHandler{
@@ -149,24 +149,24 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 			}, s.log.Context(strconv.FormatUint(
 				uint64(s.cfg.Mapping[mIdx].ID), 10)+" ("+
 				s.cfg.Mapping[mIdx].Protocol.String()+" "+
-				net.JoinHostPort(s.cfg.Mapping[mIdx].ListenInterface.String(),
+				net.JoinHostPort(s.cfg.Mapping[mIdx].Interface.String(),
 					strconv.FormatUint(
-						uint64(s.cfg.Mapping[mIdx].ListenPort), 10))+")",
+						uint64(s.cfg.Mapping[mIdx].Port), 10))+")",
 			), server.Config{
-				MaxWorkers: s.cfg.Mapping[mIdx].MaxConnections,
+				MaxWorkers: s.cfg.Mapping[mIdx].Capicty,
 				MinWorkers: pcommon.AutomaticalMinWorkerCount(
-					s.cfg.Mapping[mIdx].MaxConnections, 20),
-				MaxWorkerIdle:      s.cfg.TransceiverIdleTimeout * 10,
+					s.cfg.Mapping[mIdx].Capicty, 64),
+				MaxWorkerIdle:      s.cfg.TransceiverIdleTimeout * 20,
 				AcceptErrorWait:    300 * time.Millisecond,
 				AcceptorPerWorkers: 1024,
 			}).Serve()
 
 		case network.UDP:
 			serving, serveErr = server.New(udplistener.New(
-				s.cfg.Mapping[mIdx].ListenInterface,
-				s.cfg.Mapping[mIdx].ListenPort,
+				s.cfg.Mapping[mIdx].Interface,
+				s.cfg.Mapping[mIdx].Port,
 				s.cfg.TransceiverIdleTimeout,
-				s.cfg.Mapping[mIdx].MaxConnections,
+				s.cfg.Mapping[mIdx].Capicty,
 				make([]byte, 4096),
 				udpconn.Wrap,
 			), udpHandler{
@@ -178,14 +178,14 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 			}, s.log.Context(strconv.FormatUint(
 				uint64(s.cfg.Mapping[mIdx].ID), 10)+" ("+
 				s.cfg.Mapping[mIdx].Protocol.String()+" "+
-				net.JoinHostPort(s.cfg.Mapping[mIdx].ListenInterface.String(),
+				net.JoinHostPort(s.cfg.Mapping[mIdx].Interface.String(),
 					strconv.FormatUint(
-						uint64(s.cfg.Mapping[mIdx].ListenPort), 10))+")",
+						uint64(s.cfg.Mapping[mIdx].Port), 10))+")",
 			), server.Config{
-				MaxWorkers: s.cfg.Mapping[mIdx].MaxConnections,
+				MaxWorkers: s.cfg.Mapping[mIdx].Capicty,
 				MinWorkers: pcommon.AutomaticalMinWorkerCount(
-					s.cfg.Mapping[mIdx].MaxConnections, 20),
-				MaxWorkerIdle:      s.cfg.TransceiverIdleTimeout * 10,
+					s.cfg.Mapping[mIdx].Capicty, 64),
+				MaxWorkerIdle:      s.cfg.TransceiverIdleTimeout * 20,
 				AcceptErrorWait:    300 * time.Millisecond,
 				AcceptorPerWorkers: 1024,
 			}).Serve()
@@ -205,9 +205,9 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		if serveErr != nil {
 			s.log.Errorf("Failed to boot up server for mapper %d on \"%s\"",
 				s.cfg.Mapping[mIdx].ID, net.JoinHostPort(
-					s.cfg.Mapping[mIdx].ListenInterface.String(),
+					s.cfg.Mapping[mIdx].Interface.String(),
 					strconv.FormatUint(uint64(
-						s.cfg.Mapping[mIdx].ListenPort), 10)))
+						s.cfg.Mapping[mIdx].Port), 10)))
 
 			continue
 		}

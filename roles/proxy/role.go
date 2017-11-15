@@ -75,19 +75,19 @@ func (c *ConfigMapping) Verify() error {
 
 // ConfigInput Config
 type ConfigInput struct {
-	components            []interface{}
-	selectedListenAddress net.IP
-	selectedCodec         transceiver.Codec
-	ListenAddress         string          `json:"listen_address" cfg:"la,-listen-address:Select a network interface for server to listen on by specifiy the IP address of that interface.\r\n\r\nSet this to \"0.0.0.0\" (or \"::\" for IPv6) to make it publicly accessable, or \"127.0.0.1\" to make it local-only."`
-	ListenPort            uint16          `json:"listen_port" cfg:"lp,-listen-port:Specifiy a port for server to listen on.\r\n\r\nNotice that on some operating systems, you may not able listen on a \"High Port\" (Usually, that's a port number which smaller than 1025) without root privilege.\r\n\r\nIt's not recommended to run this server with such privilege. So instead, you should get around of this limitation by listen on a lower port (Port number that greater than 1024)."`
-	IdleTimeout           uint16          `json:"idle_timeout" cfg:"t,-idle-timeout:The maximum idle time in second of a client connection.\r\n\r\nIf server consecutively receives no data from a connection during this period of time, then that connection will be considered as inactive and thus be disconnected."`
-	InitialTimeout        uint16          `json:"initial_timeout" cfg:"it,-initial-timeout:The maximum wait time in second for clients to finish Initial request (Or first request)\r\n\r\nA well balanced value is required: You need to give clients plenty of time to finish the Initial request (Otherwise they may never be able to connect), and also be able defending against malicious accesses (By time them out) at same time."`
-	MaxConnections        uint32          `json:"capicty" cfg:"c,-capicty:The maximum connections this server will handle.\r\n\r\nIf amount of connections has reached this limitation, new incoming connections will be dropped."`
-	ConnectionChannels    uint8           `json:"connection_channels" cfg:"cc,-connection-channels:How many requests can be simultaneously opened on a single established connection.\r\n\r\nSet the value greater than 1 so a single connection will be allowed to transport multiple requests (Multiplexing). This is very useful to increase the utility of a stable connection.\r\n\r\nWhen the connection is not stable enough however, too many Connection Channels can reduce overall stabililty."`
-	ChannelDispatchDelay  uint16          `json:"channel_dispatch_delay" cfg:"cd,-channel-dispatch-delay:A delay of time in millisecond in between Connection Channel data dispatch operations.\r\n\r\nThe main propose of this setting is to limit the CPU usage of the Connection Channel data dispatch. However, it can also in part be use to control the server's connection bandwidth (Higher the delay, lower the bandwidth and CPU usage)."`
-	Mapping               []ConfigMapping `json:"mapping" cfg:"m,-mapping:Pre-defined local and remote destinations.\r\n\r\nYou can define both local and remote destinations as server will not enforce access limitation here (In opposite of the dynamical Connect request, which will deny all local accesses)."`
-	Codec                 string          `json:"codec" cfg:"co,-codec:Specifiy which Codec will be used to decode and encode data payload from and to a connection."`
-	CodecSetting          string          `json:"codec_setting" cfg:"cs,-codec-cfg:Configuration of the Codec.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
+	components           []interface{}
+	selectedInterface    net.IP
+	selectedCodec        transceiver.Codec
+	Interface            string          `json:"interface" cfg:"i,-interface:Select a network interface for server to listen on by specifiy the IP address of that interface.\r\n\r\nSet this to \"0.0.0.0\" (or \"::\" for IPv6) to make it publicly accessable, or \"127.0.0.1\" to make it local-only."`
+	Port                 uint16          `json:"port" cfg:"p,-port:Specifiy a port for server to listen on.\r\n\r\nNotice that on some operating systems, you may not able listen on a \"High Port\" (Usually, that's a port number which smaller than 1025) without root privilege.\r\n\r\nIt's not recommended to run this server with such privilege. So instead, you should get around of this limitation by listen on a lower port (Port number that greater than 1024)."`
+	Timeout              uint16          `json:"timeout" cfg:"t,-timeout:The maximum idle time in second of a client connection.\r\n\r\nIf server consecutively receives no data from a connection during this period of time, then that connection will be considered as inactive and thus be disconnected."`
+	InitialTimeout       uint16          `json:"initial_timeout" cfg:"it,-initial-timeout:The maximum wait time in second for clients to finish Initial request (Or first request)\r\n\r\nA well balanced value is required: You need to give clients plenty of time to finish the Initial request (Otherwise they may never be able to connect), and also be able defending against malicious accesses (By time them out) at same time."`
+	Capacity             uint32          `json:"capicty" cfg:"c,-capicty:The maximum connections this server will handle.\r\n\r\nIf amount of connections has reached this limitation, new incoming connections will be dropped."`
+	Channels             uint8           `json:"channels" cfg:"n,-channels:How many requests can be simultaneously opened on a single established connection.\r\n\r\nSet the value greater than 1 so a single connection will be allowed to transport multiple requests (Multiplexing). This is very useful to increase the utility of a stable connection.\r\n\r\nWhen the connection is not stable enough however, too many Connection Channels can reduce overall stabililty."`
+	ChannelDispatchDelay uint16          `json:"channel_dispatch_delay" cfg:"cd,-channel-dispatch-delay:A delay of time in millisecond in between Connection Channel data dispatch operations.\r\n\r\nThe main propose of this setting is to limit the CPU usage of the Connection Channel data dispatch. However, it can also in part be use to control the server's connection bandwidth (Higher the delay, lower the bandwidth and CPU usage)."`
+	Mapping              []ConfigMapping `json:"mapping" cfg:"m,-mapping:Pre-defined local and remote destinations.\r\n\r\nYou can define both local and remote destinations as server will not enforce access limitation here (In opposite of the dynamical Connect request, which will deny all local accesses)."`
+	Codec                string          `json:"codec" cfg:"e,-codec:Specifiy which Codec will be used to decode and encode data payload from and to a connection."`
+	CodecSetting         string          `json:"codec_setting" cfg:"es,-codec-cfg:Configuration of the Codec.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
 }
 
 // GetDescription get descriptions
@@ -95,7 +95,7 @@ func (c ConfigInput) GetDescription(fieldPath string) string {
 	result := ""
 
 	switch fieldPath {
-	case "/ListenAddress":
+	case "/Interface":
 		ifAddrs, ifAddrsErr := net.InterfaceAddrs()
 
 		if ifAddrsErr != nil {
@@ -138,24 +138,24 @@ func (c ConfigInput) GetDescription(fieldPath string) string {
 	return result
 }
 
-// VerifyListenAddress Verify ListenAddress
-func (c *ConfigInput) VerifyListenAddress() error {
-	selectedIP := net.ParseIP(c.ListenAddress)
+// VerifyInterface Verify Interface
+func (c *ConfigInput) VerifyInterface() error {
+	selectedIP := net.ParseIP(c.Interface)
 
 	if selectedIP == nil {
 		return errors.New("Invalid IP address")
 	}
 
-	c.selectedListenAddress = selectedIP
+	c.selectedInterface = selectedIP
 
 	return nil
 }
 
-// VerifyIdleTimeout Verify IdleTimeout
-func (c *ConfigInput) VerifyIdleTimeout() error {
-	if c.IdleTimeout < c.InitialTimeout {
+// VerifyTimeout Verify Timeout
+func (c *ConfigInput) VerifyTimeout() error {
+	if c.Timeout < c.InitialTimeout {
 		return errors.New(
-			"Idle Timeout must be greater than the Initial Timeout")
+			"(Idle) Timeout must be greater than the Initial Timeout")
 	}
 
 	return nil
@@ -163,7 +163,7 @@ func (c *ConfigInput) VerifyIdleTimeout() error {
 
 // VerifyInitialTimeout Verify InitialTimeout
 func (c *ConfigInput) VerifyInitialTimeout() error {
-	if c.InitialTimeout > c.IdleTimeout {
+	if c.InitialTimeout > c.Timeout {
 		return errors.New(
 			"Initial Timeout must be smaller than the Idle Timeout")
 	}
@@ -171,19 +171,19 @@ func (c *ConfigInput) VerifyInitialTimeout() error {
 	return nil
 }
 
-// VerifyMaxConnections Verify MaxConnections
-func (c *ConfigInput) VerifyMaxConnections() error {
-	if c.MaxConnections < 1 {
+// VerifyCapacity Verify Capacity
+func (c *ConfigInput) VerifyCapacity() error {
+	if c.Capacity < 1 {
 		return errors.New("Capicty must be greater than 0")
 	}
 
 	return nil
 }
 
-// VerifyConnectionChannels Verify ConnectionChannels
-func (c *ConfigInput) VerifyConnectionChannels() error {
-	if c.ConnectionChannels < 1 {
-		return errors.New("Connection Channels must be greater than 0")
+// VerifyChannels Verify Channels
+func (c *ConfigInput) VerifyChannels() error {
+	if c.Channels < 1 {
+		return errors.New("Channels must be greater than 0")
 	}
 
 	return nil
@@ -231,28 +231,28 @@ func (c *ConfigInput) VerifyCodecSetting() error {
 
 // Verify Verify all settings
 func (c *ConfigInput) Verify() error {
-	if c.ListenAddress == "" {
-		c.selectedListenAddress = net.ParseIP("127.0.0.1")
+	if c.Interface == "" {
+		c.selectedInterface = net.ParseIP("127.0.0.1")
 	}
 
-	if c.IdleTimeout <= 0 {
+	if c.Timeout <= 0 {
 		return errors.New("Idle Timeout must be specified")
 	}
 
 	if c.InitialTimeout <= 0 {
-		if c.IdleTimeout <= 10 {
+		if c.Timeout <= 10 {
 			c.InitialTimeout = 1
 		} else {
-			c.InitialTimeout = c.IdleTimeout / 10
+			c.InitialTimeout = c.Timeout / 10
 		}
 	}
 
-	if c.MaxConnections <= 0 {
+	if c.Capacity <= 0 {
 		return errors.New("Capicty must be specified")
 	}
 
-	if c.ConnectionChannels <= 0 {
-		return errors.New("Connection Channels must be specified")
+	if c.Channels <= 0 {
+		return errors.New("Channels must be specified")
 	}
 
 	if c.Codec == "" {
@@ -279,12 +279,12 @@ func Role() role.Registration {
 		Configurator: func(components role.Components) interface{} {
 			return &ConfigInput{
 				components:           components,
-				ListenAddress:        "",
-				ListenPort:           0,
-				IdleTimeout:          0,
+				Interface:            "",
+				Port:                 0,
+				Timeout:              0,
 				InitialTimeout:       0,
-				MaxConnections:       0,
-				ConnectionChannels:   0,
+				Capacity:             0,
+				Channels:             0,
 				ChannelDispatchDelay: 20,
 				Mapping:              []ConfigMapping{},
 				Codec:                "",
@@ -299,8 +299,8 @@ func Role() role.Registration {
 			cfg := config.(*ConfigInput)
 
 			listen := tcp.New(
-				cfg.selectedListenAddress,
-				cfg.ListenPort,
+				cfg.selectedInterface,
+				cfg.Port,
 				time.Duration(cfg.InitialTimeout)*time.Second,
 				tcpconn.Wrap)
 
@@ -320,12 +320,12 @@ func Role() role.Registration {
 				listen,
 				log,
 				Config{
-					MaxConnections: cfg.MaxConnections,
+					Capacity: cfg.Capacity,
 					InitialTimeout: time.Duration(
 						cfg.InitialTimeout) * time.Second,
 					IdleTimeout: time.Duration(
-						cfg.IdleTimeout) * time.Second,
-					ConnectionChannels: cfg.ConnectionChannels,
+						cfg.Timeout) * time.Second,
+					ConnectionChannels: cfg.Channels,
 					ChannelDispatchDelay: time.Duration(
 						cfg.ChannelDispatchDelay) * time.Millisecond,
 					Mapping: mapps,

@@ -10,7 +10,7 @@ sudo: false
 # Env
 env:
     global:
-        - BUILD_TARGETS="darwin/386 darwin/amd64 windows/386 windows/amd64 openbsd/386 openbsd/amd64 freebsd/386 freebsd/amd64 linux/386 linux/amd64 linux/arm linux/arm64"
+        - BUILD_TARGETS="darwin/386 darwin/amd64 windows/386 windows/amd64 openbsd/386 openbsd/amd64 freebsd/386 freebsd/amd64 linux/386 linux/amd64 linux/arm linux/arm64 linux/mips linux/mipsle linux/mips64 linux/mips64le"
         - VERSION_VARIABLE=github.com/reinit/coward/application.version
         - PACKAGE=github.com/reinit/coward
 
@@ -53,23 +53,29 @@ script:
 # - Upload coverage resutlt to coveralls
 after_success:
     - if [[ "$TRAVIS_BRANCH" == "master" && "$TRAVIS_TAG" == "" && "$COVERALLS_TOKEN" != "" ]]; then overalls -project="$PACKAGE" -covermode=count; fi
-    - if [[ "$TRAVIS_BRANCH" == "master" && "$TRAVIS_TAG" == "" && "$COVERALLS_TOKEN" != "" ]]; then goveralls -coverprofile=overalls.coverprofile -service travis-ci; fi
+    - if [[ "$TRAVIS_BRANCH" == "master" && "$TRAVIS_TAG" == "" && "$COVERALLS_TOKEN" != "" ]]; then goveralls -coverprofile=./overalls.coverprofile -service travis-ci; fi
 
 # Prepare for depoly (Compile files and upload them to GitHub release)
 # Notice we only do deploy when it's a TAGGED build in master branch
 # - Compile to binary
 # - Add few info file
 before_deploy:
-    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then CGO_ENABLED=0 gox -ldflags "-s -w -X $VERSION_VARIABLE=`git describe --always --long --dirty --tags`" -osarch "$BUILD_TARGETS" -output "dist/{{.Dir}}_{{.OS}}_{{.Arch}}"; fi
-    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then find dist -type f -exec sha1sum {} + > dist/SHA1; fi
-    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then find dist -type f -exec sha512sum {} + > dist/SHA512; fi
-    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then echo "SUMMED HASH -> SHA1 =   `sha1sum dist/SHA1`"; fi
-    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then echo "SUMMED HASH -> SHA512 = `sha512sum dist/SHA512`"; fi
+    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then CGO_ENABLED=0 gox -ldflags "-s -w -X $VERSION_VARIABLE=$(git describe --always --long --dirty --tags)" -osarch "$BUILD_TARGETS" -output "./dist/{{.Dir}}_{{.OS}}_{{.Arch}}"; fi
+    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then find dist -type f -exec sha1sum {} + > ./dist/SHA1; fi
+    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then find dist -type f -exec sha512sum {} + > ./dist/SHA512; fi
+    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then echo "SUMMED HASH -> SHA1 =   $(sha1sum ./dist/SHA1)"; fi
+    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then echo "SUMMED HASH -> SHA512 = $(sha512sum ./dist/SHA512)"; fi
+    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then echo "$(git show $TRAVIS_TAG --show-signature --shortstat)" > ./dist/Changes; fi
+    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then echo "$GITHUB_USER" > ./deploy_user; fi
+    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then echo "v$(echo $TRAVIS_TAG | cut -d'-' -f 1)" > ./deploy_title; fi
+    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then echo '#! /bin/sh' > ./deploy.sh; fi
+    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then echo 'ghr -u "$(cat ./deploy_user)" -b "$(cat ./dist/Changes)" -delete -prerelease "$(cat ./deploy_title)" ./dist/' >> ./deploy.sh; fi
+    - if [[ "$TRAVIS_TAG" =~ ^[0-9].*\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then chmod +x ./deploy.sh; fi
 
 # Upload
 deploy:
     provider: script
-    script: ghr -u "$GITHUB_USER" -delete -prerelease "v`(echo $TRAVIS_TAG | cut -d'-' -f 1)`" dist/
+    script: ./deploy.sh
     skip_cleanup: true
     on:
         branch: master

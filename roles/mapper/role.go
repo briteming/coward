@@ -39,13 +39,13 @@ import (
 
 // ConfigMapping Mapping Configuration
 type ConfigMapping struct {
-	selectProto           network.Protocol
-	selectedListenAddress net.IP
-	ID                    uint8  `json:"id" cfg:"i,-id:Mapping Item ID.\r\n\r\nMust matchs the setting defined on the COWARD Proxy."`
-	Protocol              string `json:"protocol" cfg:"o,-protocol:Protocol type of the remote destination.\r\n\r\nMust matchs the setting defined on the COWARD Proxy."`
-	ListenAddress         string `json:"listen_address" cfg:"a,-interface:Specify a local network interface to serve for the mapped destination."`
-	ListenPort            uint16 `json:"listen_port" cfg:"p,-port:Specify a local port to serve for the mapped destination."`
-	MaxConnections        uint32 `json:"capicty" cfg:"c,-capacity:The maximum connections this Mapping server can accept.\r\n\r\nWhen amount of connections reached this limitation, new incoming connection will be dropped."`
+	selectProto       network.Protocol
+	selectedInterface net.IP
+	ID                uint8  `json:"id" cfg:"i,-id:Mapping Item ID.\r\n\r\nMust matchs the setting defined on the COWARD Proxy."`
+	Protocol          string `json:"protocol" cfg:"o,-protocol:Protocol type of the remote destination.\r\n\r\nMust matchs the setting defined on the COWARD Proxy."`
+	Interface         string `json:"interface" cfg:"a,-interface:Specify a local network interface to serve for the mapped destination."`
+	Port              uint16 `json:"port" cfg:"p,-port:Specify a local port to serve for the mapped destination."`
+	Capicty           uint32 `json:"capicty" cfg:"c,-capacity:The maximum connections this Mapping server can accept.\r\n\r\nWhen amount of connections reached this limitation, new incoming connection will be dropped."`
 }
 
 // VerifyProtocol Verify Protocol
@@ -59,22 +59,22 @@ func (c *ConfigMapping) VerifyProtocol() error {
 	return nil
 }
 
-// VerifyListenAddress Verify ListenAddress
-func (c *ConfigMapping) VerifyListenAddress() error {
-	ipAddr := net.ParseIP(c.ListenAddress)
+// VerifyInterface Verify Interface
+func (c *ConfigMapping) VerifyInterface() error {
+	ipAddr := net.ParseIP(c.Interface)
 
 	if ipAddr == nil {
 		return errors.New("Invalid IP address")
 	}
 
-	c.selectedListenAddress = ipAddr
+	c.selectedInterface = ipAddr
 
 	return nil
 }
 
-// VerifyMaxConnections Verify MaxConnections
-func (c *ConfigMapping) VerifyMaxConnections() error {
-	if c.MaxConnections < 1 {
+// VerifyCapicty Verify Capicty
+func (c *ConfigMapping) VerifyCapicty() error {
+	if c.Capicty < 1 {
 		return errors.New("Capicty must be greater than 0")
 	}
 
@@ -84,18 +84,18 @@ func (c *ConfigMapping) VerifyMaxConnections() error {
 // Verify Verifies
 func (c *ConfigMapping) Verify() error {
 	if c.Protocol == "" || c.selectProto == network.UnspecifiedProto {
-		return fmt.Errorf("Mapping Protocol must be defined")
+		return fmt.Errorf("Protocol must be defined")
 	}
 
-	if c.ListenAddress == "" {
-		return errors.New("Listen Address must be specified")
+	if c.Interface == "" {
+		return errors.New("Interface must be specified")
 	}
 
-	if c.ListenPort < 0 {
-		return errors.New("Listen Port must be specified")
+	if c.Port < 0 {
+		return errors.New("Port must be specified")
 	}
 
-	if c.MaxConnections <= 0 {
+	if c.Capicty <= 0 {
 		return errors.New("Capicty must be specified")
 	}
 
@@ -104,19 +104,19 @@ func (c *ConfigMapping) Verify() error {
 
 // ConfigInput Configuration
 type ConfigInput struct {
-	components           []interface{}
-	selectedCodec        transceiver.Codec
-	ProxyHost            string          `json:"proxy_host" cfg:"ph,-proxy-host:Host name of the remote COWARD Proxy server.\r\n\r\nMust matchs the configuration on the Proxy server."`
-	ProxyPort            uint16          `json:"proxy_port" cfg:"pp,-proxy-port:Port number of the remote COWARD Proxy server.\r\n\r\nMust matchs the configuration on the Proxy server."`
-	MaxConnections       uint32          `json:"max_connections" cfg:"mc,-connections:The maximum concurrent connections that can be maintained by a single COWARD Proxy Client at same time.\r\n\r\nWhen this limitation has been reached, new requests will has to wait until existing requests is completed before continue requesting."`
-	ConnectionPersistent bool            `json:"connection_persist" cfg:"pc,-persist:Whether or not to keep the connection to the COWARD Proxy active after all requests on the connection is completed."`
-	RequestRetries       uint8           `json:"request_retries" cfg:"rr,-request-retries:How many times a failed Initial request can be retried."`
-	ConnectionChannels   uint8           `json:"channels" cfg:"pm,-channels:How many requests can be simultaneously opened on a single established connection.\r\n\r\nSet the value greater than 1 so a single connection can be use to transport multiple requests (Multiplexing).\r\n\r\nWARNING:\r\nThis value must matchs or smaller than the related setting on the COWARD Proxy server, otherwise the request will be come malformed and thus dropped."`
-	IdleTimeout          uint16          `json:"idle_timeout" cfg:"t,-timeout:The maximum idle time in second of the established proxy connection.\r\n\r\nIf the proxy connection consecutively idle during this period of time, then that connection will be considered as inactive and thus be disconnected.\r\n\r\nIt is recommended to set this value no greater than the related one on the COWARD Proxy server setting."`
-	RequestTimeout       uint16          `json:"request_timeout" cfg:"rt,-request-timeout:The maximum wait time in second for the server to respond the Initial request of a client.\r\n\r\nIf the COWARD Proxy server has failed to respond the Initial request within this period of time, the connection will be considered broken and thus be closed.\r\n\r\nIt is recommended to set this value slightly greater than the \"--initial-timeout\" setting on the COWARD Proxy server."`
-	Mapping              []ConfigMapping `json:"mapping" cfg:"m,-mapping:Enable and configure mapped remote destinations.\r\n\r\nThis will allow you to map the pre-defined destinations on the Proxy as local servers.\r\n\r\nAll access to these servers will be relayed to their corresponding remote destinations transparently through the COWARD Proxy server."`
-	Codec                string          `json:"codec" cfg:"co,-codec:Specifiy which Codec will be used to decode and encode data payload from and to a connection."`
-	CodecSetting         string          `json:"codec_setting" cfg:"cs,-codec-cfg:Configuration of the Codec.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
+	components     []interface{}
+	selectedCodec  transceiver.Codec
+	Host           string          `json:"host" cfg:"h,-host:Host name of the remote COWARD Proxy server.\r\n\r\nMust matchs the configuration on the Proxy server."`
+	Port           uint16          `json:"port" cfg:"p,-port:Port number of the remote COWARD Proxy server.\r\n\r\nMust matchs the configuration on the Proxy server."`
+	Connections    uint32          `json:"connections" cfg:"c,-connections:The maximum concurrent connections that can be established with a COWARD Proxy Server."`
+	Persistent     bool            `json:"persist" cfg:"k,-persist:Whether or not to keep the connection to the COWARD Proxy active even after all requests on the connection is completed."`
+	RequestRetries uint8           `json:"retries" cfg:"r,-retries:How many times a failed Initial request can be retried."`
+	Channels       uint8           `json:"channels" cfg:"n,-channels:How many requests can be simultaneously opened on a single established connection.\r\n\r\nSet the value greater than 1 so a single connection can be use to transport multiple requests (Multiplexing).\r\n\r\nWARNING:\r\nThis value must matchs or smaller than the related setting on the COWARD Proxy server, otherwise the request will be come malformed and thus dropped."`
+	Timeout        uint16          `json:"timeout" cfg:"t,-timeout:The maximum idle time in second of a established proxy connection.\r\n\r\nIf the proxy connection consecutively idle during this period of time, then that connection will be considered as inactive and thus be disconnected.\r\n\r\nIt is recommended to set this value no greater than the related one on the COWARD Proxy server setting."`
+	RequestTimeout uint16          `json:"request_timeout" cfg:"rt,-request-timeout:The maximum wait time in second for the server to respond the Initial request of a client.\r\n\r\nIf the COWARD Proxy server has failed to respond the Initial request within this period of time, the connection will be considered broken and thus be closed.\r\n\r\nIt is recommended to set this value slightly greater than the \"--initial-timeout\" setting on the COWARD Proxy server."`
+	Mapping        []ConfigMapping `json:"mapping" cfg:"m,-mapping:Enable and configure mapped remote destinations.\r\n\r\nThis will allow you to map the pre-defined destinations on the Proxy as local servers.\r\n\r\nAll access to these servers will be relayed to their corresponding remote destinations transparently through the COWARD Proxy server."`
+	Codec          string          `json:"codec" cfg:"e,-codec:Specifiy which Codec will be used to decode and encode data payload from and to a connection."`
+	CodecSetting   string          `json:"codec_setting" cfg:"es,-codec-cfg:Configuration of the Codec.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
 }
 
 // GetDescription gets description
@@ -124,7 +124,7 @@ func (c ConfigInput) GetDescription(fieldPath string) string {
 	result := ""
 
 	switch fieldPath {
-	case "/Mapping/ListenAddress":
+	case "/Mapping/Interface":
 		ifAddrs, ifAddrsErr := net.InterfaceAddrs()
 
 		if ifAddrsErr != nil {
@@ -167,10 +167,10 @@ func (c ConfigInput) GetDescription(fieldPath string) string {
 	return result
 }
 
-// VerifyProxyPort Verify ProxyPort
-func (c *ConfigInput) VerifyProxyPort() error {
-	if c.ProxyPort <= 0 {
-		return errors.New("Proxy Port must be greater than 0")
+// VerifyPort Verify Port
+func (c *ConfigInput) VerifyPort() error {
+	if c.Port <= 0 {
+		return errors.New("Port must be greater than 0")
 	}
 
 	return nil
@@ -185,20 +185,20 @@ func (c *ConfigInput) VerifyRequestRetries() error {
 	return nil
 }
 
-// VerifyConnectionChannels Verify ConnectionChannels
-func (c *ConfigInput) VerifyConnectionChannels() error {
-	if c.ConnectionChannels <= 0 {
+// VerifyChannels Verify Channels
+func (c *ConfigInput) VerifyChannels() error {
+	if c.Channels <= 0 {
 		return errors.New("Channels must be greater than 0")
 	}
 
 	return nil
 }
 
-// VerifyIdleTimeout Verify IdleTimeout
-func (c *ConfigInput) VerifyIdleTimeout() error {
-	if c.IdleTimeout < c.RequestTimeout {
+// VerifyTimeout Verify Timeout
+func (c *ConfigInput) VerifyTimeout() error {
+	if c.Timeout < c.RequestTimeout {
 		return errors.New(
-			"Idle Timeout must be greater than the Request Timeout")
+			"(Idle) Timeout must be greater than the Request Timeout")
 	}
 
 	return nil
@@ -206,9 +206,9 @@ func (c *ConfigInput) VerifyIdleTimeout() error {
 
 // VerifyRequestTimeout Verify RequestTimeout
 func (c *ConfigInput) VerifyRequestTimeout() error {
-	if c.RequestTimeout > c.IdleTimeout {
+	if c.RequestTimeout > c.Timeout {
 		return errors.New(
-			"Request Timeout must be smaller than the Idle Timeout")
+			"Request Timeout must be smaller than the (Idle) Timeout")
 	}
 
 	return nil
@@ -247,15 +247,15 @@ func (c *ConfigInput) VerifyCodecSetting() error {
 
 // Verify Verifies
 func (c *ConfigInput) Verify() error {
-	if c.ProxyHost == "" {
-		return errors.New("Proxy Host must be specified")
+	if c.Host == "" {
+		return errors.New("Host must be specified")
 	}
 
-	if c.ProxyPort <= 0 {
-		return errors.New("Proxy Port must be specified")
+	if c.Port <= 0 {
+		return errors.New("Port must be specified")
 	}
 
-	if c.MaxConnections <= 0 {
+	if c.Connections <= 0 {
 		return errors.New("Connections must be specified")
 	}
 
@@ -263,19 +263,19 @@ func (c *ConfigInput) Verify() error {
 		c.RequestRetries = 3
 	}
 
-	if c.ConnectionChannels <= 0 {
+	if c.Channels <= 0 {
 		return errors.New("Channels must be specified")
 	}
 
-	if c.IdleTimeout <= 0 {
-		return errors.New("Idle Timeout must be specified")
+	if c.Timeout <= 0 {
+		return errors.New("(Idle) Timeout must be specified")
 	}
 
 	if c.RequestTimeout <= 0 {
-		if c.IdleTimeout <= 10 {
+		if c.Timeout <= 10 {
 			c.RequestTimeout = 1
 		} else {
-			c.RequestTimeout = c.IdleTimeout / 10
+			c.RequestTimeout = c.Timeout / 10
 		}
 	}
 
@@ -306,18 +306,18 @@ func Role() role.Registration {
 			"Proxy as server",
 		Configurator: func(components role.Components) interface{} {
 			return &ConfigInput{
-				components:           components,
-				ProxyHost:            "",
-				ProxyPort:            0,
-				MaxConnections:       0,
-				ConnectionPersistent: false,
-				RequestRetries:       0,
-				ConnectionChannels:   0,
-				IdleTimeout:          0,
-				RequestTimeout:       0,
-				Mapping:              []ConfigMapping{},
-				Codec:                "",
-				CodecSetting:         "",
+				components:     components,
+				Host:           "",
+				Port:           0,
+				Connections:    0,
+				Persistent:     false,
+				RequestRetries: 0,
+				Channels:       0,
+				Timeout:        0,
+				RequestTimeout: 0,
+				Mapping:        []ConfigMapping{},
+				Codec:          "",
+				CodecSetting:   "",
 			}
 		},
 		Generater: func(
@@ -328,8 +328,8 @@ func Role() role.Registration {
 			cfg := config.(*ConfigInput)
 
 			dialer := tcp.New(
-				cfg.ProxyHost,
-				cfg.ProxyPort,
+				cfg.Host,
+				cfg.Port,
 				time.Duration(cfg.RequestTimeout)*time.Second,
 				tcpconn.Wrap,
 			)
@@ -338,11 +338,11 @@ func Role() role.Registration {
 
 			for mIdx := range cfg.Mapping {
 				mapps[mIdx] = Mapped{
-					ID:              common.MapID(cfg.Mapping[mIdx].ID),
-					ListenInterface: cfg.Mapping[mIdx].selectedListenAddress,
-					ListenPort:      cfg.Mapping[mIdx].ListenPort,
-					Protocol:        cfg.Mapping[mIdx].selectProto,
-					MaxConnections:  cfg.Mapping[mIdx].MaxConnections,
+					ID:        common.MapID(cfg.Mapping[mIdx].ID),
+					Interface: cfg.Mapping[mIdx].selectedInterface,
+					Port:      cfg.Mapping[mIdx].Port,
+					Protocol:  cfg.Mapping[mIdx].selectProto,
+					Capicty:   cfg.Mapping[mIdx].Capicty,
 				}
 			}
 
@@ -351,14 +351,14 @@ func Role() role.Registration {
 				dialer,
 				log,
 				Config{
-					TransceiverMaxConnections: cfg.MaxConnections,
+					TransceiverMaxConnections: cfg.Connections,
 					TransceiverRequestRetries: cfg.RequestRetries,
 					TransceiverIdleTimeout: time.Duration(
-						cfg.IdleTimeout) * time.Second,
+						cfg.Timeout) * time.Second,
 					TransceiverInitialTimeout: time.Duration(
 						cfg.RequestTimeout) * time.Second,
-					TransceiverConnectionPersistent: cfg.ConnectionPersistent,
-					TransceiverChannels:             cfg.ConnectionChannels,
+					TransceiverConnectionPersistent: cfg.Persistent,
+					TransceiverChannels:             cfg.Channels,
 					Mapping:                         mapps,
 				}), nil
 		},

@@ -91,8 +91,8 @@ func (s *socks5) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 
 	runner, runnerServeErr := corunner.New(s.log, corunner.Config{
 		MaxWorkers:        vChannels,
-		MinWorkers:        pcommon.AutomaticalMinWorkerCount(vChannels, 3000),
-		MaxWorkerIdle:     s.cfg.ConnectionTimeout * 20,
+		MinWorkers:        pcommon.AutomaticalMinWorkerCount(vChannels, 128),
+		MaxWorkerIdle:     s.cfg.ConnectionTimeout * 10,
 		JobReceiveTimeout: s.cfg.NegotiationTimeout,
 	}).Serve()
 
@@ -126,10 +126,10 @@ func (s *socks5) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		timeout:       s.cfg.ConnectionTimeout,
 		authenticator: s.cfg.Authenticator,
 	}, s.log, server.Config{
-		MaxWorkers: s.cfg.MaxConnections,
+		MaxWorkers: s.cfg.Capacity,
 		MinWorkers: pcommon.AutomaticalMinWorkerCount(
-			s.cfg.MaxConnections, 20),
-		MaxWorkerIdle:      s.cfg.ConnectionTimeout * 10,
+			s.cfg.Capacity, 64),
+		MaxWorkerIdle:      s.cfg.ConnectionTimeout * 20,
 		AcceptErrorWait:    100 * time.Millisecond,
 		AcceptorPerWorkers: 1024,
 	}).Serve()

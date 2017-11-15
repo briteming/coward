@@ -85,11 +85,11 @@ func (s *proxy) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 
 	// Start Corunner
 	runner, runnerServeErr := corunner.New(s.logger, corunner.Config{
-		MaxWorkers: s.cfg.MaxConnections * uint32(
+		MaxWorkers: s.cfg.Capacity * uint32(
 			s.cfg.ConnectionChannels),
 		MinWorkers: common.AutomaticalMinWorkerCount(
-			s.cfg.MaxConnections*uint32(s.cfg.ConnectionChannels), 3000),
-		MaxWorkerIdle:     s.cfg.IdleTimeout * 20,
+			s.cfg.Capacity*uint32(s.cfg.ConnectionChannels), 128),
+		MaxWorkerIdle:     s.cfg.IdleTimeout * 10,
 		JobReceiveTimeout: s.cfg.InitialTimeout,
 	}).Serve()
 
@@ -116,10 +116,10 @@ func (s *proxy) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		mapping: s.mapping,
 		cfg:     s.cfg,
 	}, s.logger, server.Config{
-		MaxWorkers: s.cfg.MaxConnections,
+		MaxWorkers: s.cfg.Capacity,
 		MinWorkers: common.AutomaticalMinWorkerCount(
-			s.cfg.MaxConnections, 20),
-		MaxWorkerIdle:      s.cfg.IdleTimeout * 10,
+			s.cfg.Capacity, 64),
+		MaxWorkerIdle:      s.cfg.IdleTimeout * 20,
 		AcceptErrorWait:    300 * time.Millisecond,
 		AcceptorPerWorkers: 1024,
 	}).Serve()

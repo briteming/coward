@@ -120,3 +120,21 @@ func TestAESCFB(t *testing.T) {
 		return
 	}
 }
+
+func TestAESCFBNonceIncreament(t *testing.T) {
+	a := aesgcm{}
+	nonce := [nonceSize]byte{}
+
+	for i := 0; i < 999999998; i++ {
+		a.nonceIncreament(nonce[:])
+	}
+
+	if !bytes.Equal(
+		[]byte{254, 201, 154, 59, 0, 0, 0, 0, 0, 0, 0, 0}, nonce[:]) {
+		t.Error("nonceIncreament has failed. Expected increamented "+
+			"result would be %d, got %d", []byte{
+			254, 201, 154, 59, 0, 0, 0, 0, 0, 0, 0, 0}, nonce[:])
+
+		return
+	}
+}

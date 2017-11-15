@@ -27,7 +27,6 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"errors"
 	"hash"
 	"io"
 	"math"
@@ -36,6 +35,7 @@ import (
 	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/codec/key"
 	"github.com/reinit/coward/roles/common/codec/marker"
+	"github.com/reinit/coward/roles/common/transceiver"
 )
 
 const (
@@ -45,10 +45,10 @@ const (
 
 // Errors
 var (
-	ErrSegmentDataTooLong = errors.New(
+	ErrSegmentDataTooLong = transceiver.NewCodecError(
 		"AES stream data segment was too long")
 
-	ErrSegmentDataVerificationFailed = errors.New(
+	ErrSegmentDataVerificationFailed = transceiver.NewCodecError(
 		"AES stream data segment verification failed")
 )
 

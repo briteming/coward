@@ -37,18 +37,18 @@ import (
 
 // ConfigProxy Proxy configurations
 type ConfigProxy struct {
-	components           []interface{}
-	selectedCodec        transceiver.Codec
-	ProxyHost            string `json:"proxy_host" cfg:"h,-host:Host name of the remote COWARD Proxy server.\r\n\r\nMust matchs the setting on server."`
-	ProxyPort            uint16 `json:"proxy_port" cfg:"p,-port:Port number of the remote COWARD Proxy server.\r\n\r\nMust matchs the setting on server."`
-	MaxConnections       uint32 `json:"max_connection" cfg:"mc,-connections:The maximum concurrent connections that can be maintained by a single COWARD Proxy Client at same time.\r\n\r\nWhen this limitation has been reached, new requests will has to wait until existing requests is completed before continue requesting."`
-	RequestRetries       uint8  `json:"request_retries" cfg:"rr,-retries:How many times a failed Initial request can be retried."`
-	IdleTimeout          uint16 `json:"idle_timeout" cfg:"t,-timeout:The maximum idle time in second of the established proxy connection.\r\n\r\nIf the proxy connection consecutively idle during this period of time, then that connection will be considered as inactive and thus be disconnected.\r\n\r\nIt is recommended to set this value no greater than the related one on the COWARD Proxy server setting."`
-	RequestTimeout       uint16 `json:"request_timeout" cfg:"rt,-request-timeout:The maximum wait time in second for the server to respond the Initial request of a client.\r\n\r\nIf the COWARD Proxy server has failed to respond the Initial request within this period of time, the connection will be considered broken and thus be closed.\r\n\r\nIt is recommended to set this value slightly greater than the \"--initial-timeout\" setting on the COWARD Proxy server."`
-	ConnectionChannels   uint8  `json:"proxy_channels" cfg:"ch,-channels:How many requests can be simultaneously opened on a single established connection.\r\n\r\nSet the value greater than 1 so a single connection can be use to transport multiple requests (Multiplexing).\r\n\r\nWARNING:\r\nThis value must matchs or smaller than the related setting on the COWARD Proxy server, otherwise the request will be come malformed and thus dropped."`
-	ConnectionPersistent bool   `json:"proxy_persist" cfg:"cp,-persist:Whether or not to keep the connection to the COWARD Proxy active after all requests on the connection is completed."`
-	Codec                string `json:"codec" cfg:"co,-codec:Specifiy which Codec will be used to decode and encode data payload from and to a connection."`
-	CodecSetting         string `json:"codec_setting" cfg:"cs,-codec-cfg:Configuration of the Codec.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
+	components     []interface{}
+	selectedCodec  transceiver.Codec
+	Host           string `json:"host" cfg:"h,-host:Host name of the remote COWARD Proxy server.\r\n\r\nMust matchs the setting on server."`
+	Port           uint16 `json:"port" cfg:"p,-port:Port number of the remote COWARD Proxy server.\r\n\r\nMust matchs the setting on server."`
+	Connections    uint32 `json:"connections" cfg:"c,-connections:The maximum concurrent connections that can be established to a COWARD Proxy server."`
+	RequestRetries uint8  `json:"retries" cfg:"r,-retries:How many times a failed Initial request can be retried."`
+	Timeout        uint16 `json:"timeout" cfg:"t,-timeout:The maximum idle time in second of the established proxy connection.\r\n\r\nIf the proxy connection consecutively idle during this period of time, then that connection will be considered as inactive and thus be disconnected.\r\n\r\nIt is recommended to set this value no greater than the related one on the COWARD Proxy server setting."`
+	RequestTimeout uint16 `json:"request_timeout" cfg:"rt,-request-timeout:The maximum wait time in second for the server to respond the Initial request of a client.\r\n\r\nIf the COWARD Proxy server has failed to respond the Initial request within this period of time, the connection will be considered broken and thus be closed.\r\n\r\nIt is recommended to set this value slightly greater than the \"--initial-timeout\" setting on the COWARD Proxy server."`
+	Channels       uint8  `json:"channels" cfg:"n,-channels:How many requests can be simultaneously opened on a single established connection.\r\n\r\nSet the value greater than 1 so a single connection can be use to transport multiple requests (Multiplexing).\r\n\r\nWARNING:\r\nThis value must matchs or smaller than the related setting on the COWARD Proxy server, otherwise the request will be come malformed and thus dropped."`
+	Persistent     bool   `json:"persist" cfg:"k,-persist:Whether or not to keep the connection to the COWARD Proxy active after all requests on the connection is completed."`
+	Codec          string `json:"codec" cfg:"e,-codec:Specifiy which Codec will be used to decode and encode data payload from and to a connection."`
+	CodecSetting   string `json:"codec_setting" cfg:"es,-codec-cfg:Configuration of the Codec.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
 }
 
 // Init inits the configuration
@@ -56,18 +56,18 @@ func (c *ConfigProxy) Init(parent *ConfigInput) {
 	c.components = parent.components
 }
 
-// VerifyProxyPort Verify ProxyPort
-func (c *ConfigProxy) VerifyProxyPort() error {
-	if c.ProxyPort < 1 {
+// VerifyPort Verify Port
+func (c *ConfigProxy) VerifyPort() error {
+	if c.Port < 1 {
 		return errors.New("Port must be greater than 0")
 	}
 
 	return nil
 }
 
-// VerifyMaxConnections Verify MaxConnections
-func (c *ConfigProxy) VerifyMaxConnections() error {
-	if c.MaxConnections < 1 {
+// VerifyConnections Verify Connections
+func (c *ConfigProxy) VerifyConnections() error {
+	if c.Connections < 1 {
 		return errors.New("Connections must be greater than 0")
 	}
 
@@ -83,9 +83,9 @@ func (c *ConfigProxy) VerifyRequestRetries() error {
 	return nil
 }
 
-// VerifyIdleTimeout Verify IdleTimeout
-func (c *ConfigProxy) VerifyIdleTimeout() error {
-	if c.IdleTimeout < c.RequestTimeout {
+// VerifyTimeout Verify Timeout
+func (c *ConfigProxy) VerifyTimeout() error {
+	if c.Timeout < c.RequestTimeout {
 		return errors.New(
 			"(Idle) Timeout must be greater than the Request Timeout")
 	}
@@ -95,7 +95,7 @@ func (c *ConfigProxy) VerifyIdleTimeout() error {
 
 // VerifyRequestTimeout Verify RequestTimeout
 func (c *ConfigProxy) VerifyRequestTimeout() error {
-	if c.RequestTimeout > c.IdleTimeout {
+	if c.RequestTimeout > c.Timeout {
 		return errors.New(
 			"Request Timeout must be smaller than the (Idle) Timeout")
 	}
@@ -103,9 +103,9 @@ func (c *ConfigProxy) VerifyRequestTimeout() error {
 	return nil
 }
 
-// VerifyConnectionChannels Verify ConnectionChannels
-func (c *ConfigProxy) VerifyConnectionChannels() error {
-	if c.ConnectionChannels < 1 {
+// VerifyChannels Verify Channels
+func (c *ConfigProxy) VerifyChannels() error {
+	if c.Channels < 1 {
 		return errors.New("Channels must be greater than 0")
 	}
 
@@ -145,15 +145,15 @@ func (c *ConfigProxy) VerifyCodecSetting() error {
 
 // Verify Verifies
 func (c *ConfigProxy) Verify() error {
-	if c.ProxyHost == "" {
+	if c.Host == "" {
 		return errors.New("Host must be defined")
 	}
 
-	if c.ProxyPort <= 0 {
+	if c.Port <= 0 {
 		return errors.New("Port must be defined")
 	}
 
-	if c.MaxConnections <= 0 {
+	if c.Connections <= 0 {
 		return errors.New("Connections must be defined")
 	}
 
@@ -161,19 +161,19 @@ func (c *ConfigProxy) Verify() error {
 		c.RequestRetries = 3
 	}
 
-	if c.IdleTimeout <= 0 {
+	if c.Timeout <= 0 {
 		return errors.New("(Idle) Timeout must be defined")
 	}
 
 	if c.RequestTimeout <= 0 {
-		if c.IdleTimeout <= 10 {
+		if c.Timeout <= 10 {
 			c.RequestTimeout = 1
 		} else {
-			c.RequestTimeout = c.IdleTimeout / 10
+			c.RequestTimeout = c.Timeout / 10
 		}
 	}
 
-	if c.ConnectionChannels <= 0 {
+	if c.Channels <= 0 {
 		return errors.New("Channels must be defined")
 	}
 
@@ -192,16 +192,54 @@ func (c *ConfigProxy) Verify() error {
 	return nil
 }
 
+// ConfigAccount Socks5 accounts
+type ConfigAccount struct {
+	Username string `json:"username" cfg:"u,-user:Login name of the Socks5 account."`
+	Password string `json:"password" cfg:"p,-pass:Password of the Socks5 account."`
+}
+
+// VerifyUsername Verify Username
+func (c *ConfigAccount) VerifyUsername() error {
+	if c.Username == "" {
+		return errors.New("Username must be defined")
+	}
+
+	return nil
+}
+
+// VerifyPassword Verify Password
+func (c *ConfigAccount) VerifyPassword() error {
+	if c.Password == "" {
+		return errors.New("Password must be defined")
+	}
+
+	return nil
+}
+
+// Verify Verifies
+func (c *ConfigAccount) Verify() error {
+	if c.Username == "" {
+		return errors.New("Username must be defined")
+	}
+
+	if c.Password == "" {
+		return errors.New("Password must be defined")
+	}
+
+	return nil
+}
+
 // ConfigInput Configuration
 type ConfigInput struct {
-	components       []interface{}
-	selectedListenIP net.IP
-	Proxies          []ConfigProxy `json:"proxies" cfg:"r,-proxies:Specify a set of remote COWARD Proxy servers.\r\n\r\nRequest will be dispatched to one of these proxies automatically."`
-	ListenAddress    string        `json:"listen_address" cfg:"i,-interface:Specify a local network interface to serve the Socks5 server."`
-	ListenPort       uint16        `json:"listen_port" cfg:"p,-port:Specify a port to serve the Socks5 server"`
-	IdleTimeout      uint16        `json:"idle_timeout" cfg:"t,-idle-timeout:The maximum idle time in second of a Socks5 client connection.\r\n\r\nIf server consecutively receives no data from a connection during this period of time, then that connection will be considered as inactive and thus be disconnected."`
-	InitialTimeout   uint16        `json:"initial_timeout" cfg:"it,-initial-timeout:The maximum wait time in second for Socks5 clients to finish Handshake.\r\n\r\nA well balanced value is required: You need to give clients plenty of time to finish the Initial request (Otherwise they may never be able to connect), and also be able defending against malicious accesses (By time them out) at same time."`
-	MaxConnections   uint32        `json:"capicty" cfg:"c,-capacity:The maximum connections this Socks5 server can accept.\r\n\r\nWhen amount of connections reached this limitation, new incoming connection will be dropped."`
+	components        []interface{}
+	selectedInterface net.IP
+	Proxies           []ConfigProxy   `json:"proxies" cfg:"r,-proxies:Specify a set of remote COWARD Proxy servers.\r\n\r\nRequest will be dispatched to one of these proxies automatically."`
+	Interface         string          `json:"interface" cfg:"i,-interface:Specify a local network interface to serve the Socks5 server."`
+	Port              uint16          `json:"port" cfg:"p,-port:Specify a port to serve the Socks5 server"`
+	Timeout           uint16          `json:"timeout" cfg:"t,-timeout:The maximum idle time in second of a Socks5 client connection.\r\n\r\nIf server consecutively receives no data from a connection during this period of time, then that connection will be considered as inactive and thus be disconnected."`
+	InitialTimeout    uint16          `json:"initial_timeout" cfg:"it,-initial-timeout:The maximum wait time in second for Socks5 clients to finish Handshake.\r\n\r\nA well balanced value is required: You need to give clients plenty of time to finish the Initial request (Otherwise they may never be able to connect), and also be able defending against malicious accesses (By time them out) at same time."`
+	Capacity          uint32          `json:"capicty" cfg:"c,-capacity:The maximum connections this Socks5 server can accept.\r\n\r\nWhen amount of connections reached this limitation, new incoming connection will be dropped."`
+	Account           []ConfigAccount `json:"account" cfg:"a,-accounts:Accounts of the Socks5 server.\r\n\r\nOnce defined, the Socks5 server will require user authentication before relaying the request."`
 }
 
 // GetDescription gets description
@@ -209,7 +247,7 @@ func (c ConfigInput) GetDescription(fieldPath string) string {
 	result := ""
 
 	switch fieldPath {
-	case "/ListenAddress":
+	case "/Interface":
 		ifAddrs, ifAddrsErr := net.InterfaceAddrs()
 
 		if ifAddrsErr != nil {
@@ -248,33 +286,33 @@ func (c ConfigInput) GetDescription(fieldPath string) string {
 	return result
 }
 
-// VerifyListenAddress Verify ListenAddress
-func (c *ConfigInput) VerifyListenAddress() error {
-	listenIP := net.ParseIP(c.ListenAddress)
+// VerifyInterface Verify Interface
+func (c *ConfigInput) VerifyInterface() error {
+	listenIP := net.ParseIP(c.Interface)
 
 	if listenIP == nil {
 		return errors.New("Invalid IP address")
 	}
 
-	c.selectedListenIP = listenIP
+	c.selectedInterface = listenIP
 
 	return nil
 }
 
-// VerifyListenPort Verify ListenPort
-func (c *ConfigInput) VerifyListenPort() error {
-	if c.ListenPort <= 0 {
+// VerifyPort Verify Port
+func (c *ConfigInput) VerifyPort() error {
+	if c.Port <= 0 {
 		return errors.New("Port number must be greater than 0")
 	}
 
 	return nil
 }
 
-// VerifyIdleTimeout Verify IdleTimeout
-func (c *ConfigInput) VerifyIdleTimeout() error {
-	if c.IdleTimeout < c.InitialTimeout {
+// VerifyTimeout Verify Timeout
+func (c *ConfigInput) VerifyTimeout() error {
+	if c.Timeout < c.InitialTimeout {
 		return errors.New(
-			"Idle Timeout must be greater than the Initial Timeout")
+			"(Idle) Timeout must be greater than the Request Timeout")
 	}
 
 	return nil
@@ -282,17 +320,17 @@ func (c *ConfigInput) VerifyIdleTimeout() error {
 
 // VerifyInitialTimeout Verify InitialTimeout
 func (c *ConfigInput) VerifyInitialTimeout() error {
-	if c.InitialTimeout > c.IdleTimeout {
+	if c.InitialTimeout > c.Timeout {
 		return errors.New(
-			"Initial Timeout must be smaller than the Idle Timeout")
+			"Request Timeout must be smaller than the (Idle) Timeout")
 	}
 
 	return nil
 }
 
-// VerifyMaxConnections Verify MaxConnections
-func (c *ConfigInput) VerifyMaxConnections() error {
-	if c.MaxConnections <= 0 {
+// VerifyCapicty Verify Capicty
+func (c *ConfigInput) VerifyCapicty() error {
+	if c.Capacity <= 0 {
 		return errors.New("Capicty must be greater than 0")
 	}
 
@@ -305,23 +343,23 @@ func (c *ConfigInput) Verify() error {
 		return errors.New("At least one Proxy is required")
 	}
 
-	if c.ListenAddress == "" {
-		c.selectedListenIP = net.ParseIP(c.ListenAddress)
+	if c.Interface == "" {
+		c.selectedInterface = net.ParseIP("127.0.0.1")
 	}
 
-	if c.IdleTimeout <= 0 {
-		return errors.New("Idle Timeout must be specified")
+	if c.Timeout <= 0 {
+		return errors.New("(Idle) Timeout must be specified")
 	}
 
 	if c.InitialTimeout <= 0 {
-		if c.IdleTimeout <= 10 {
+		if c.Timeout <= 10 {
 			c.InitialTimeout = 1
 		} else {
-			c.InitialTimeout = c.IdleTimeout / 10
+			c.InitialTimeout = c.Timeout / 10
 		}
 	}
 
-	if c.MaxConnections <= 0 {
+	if c.Capacity <= 0 {
 		return errors.New("Capicty must be specified")
 	}
 
@@ -336,14 +374,14 @@ func Role() role.Registration {
 			"COWARD Proxy Requests and send them to a COWARD Proxy server",
 		Configurator: func(components role.Components) interface{} {
 			return &ConfigInput{
-				components:       components,
-				selectedListenIP: nil,
-				Proxies:          []ConfigProxy{},
-				ListenAddress:    "",
-				ListenPort:       0,
-				IdleTimeout:      0,
-				InitialTimeout:   0,
-				MaxConnections:   0,
+				components:        components,
+				selectedInterface: nil,
+				Proxies:           []ConfigProxy{},
+				Interface:         "",
+				Port:              0,
+				Timeout:           0,
+				InitialTimeout:    0,
+				Capacity:          0,
 			}
 		},
 		Generater: func(
@@ -354,8 +392,8 @@ func Role() role.Registration {
 			cfg := config.(*ConfigInput)
 
 			listen := tcplisten.New(
-				cfg.selectedListenIP,
-				cfg.ListenPort,
+				cfg.selectedInterface,
+				cfg.Port,
 				time.Duration(cfg.InitialTimeout)*time.Second,
 				tcpconn.Wrap)
 
@@ -365,32 +403,57 @@ func Role() role.Registration {
 				clentID := transceiver.ClientID(cIdx)
 
 				clients[cIdx] = tclient.New(clentID, log, tcp.New(
-					cfg.Proxies[cIdx].ProxyHost,
-					cfg.Proxies[cIdx].ProxyPort,
+					cfg.Proxies[cIdx].Host,
+					cfg.Proxies[cIdx].Port,
 					time.Duration(cfg.Proxies[cIdx].RequestTimeout)*time.Second,
 					tcpconn.Wrap,
 				), cfg.Proxies[cIdx].selectedCodec.Build(
 					[]byte(cfg.Proxies[cIdx].CodecSetting),
 				), tclient.Config{
-					MaxConcurrent:  cfg.Proxies[cIdx].MaxConnections,
+					MaxConcurrent:  cfg.Proxies[cIdx].Connections,
 					RequestRetries: cfg.Proxies[cIdx].RequestRetries,
 					InitialTimeout: time.Duration(
 						cfg.Proxies[cIdx].RequestTimeout) * time.Second,
 					IdleTimeout: time.Duration(
-						cfg.Proxies[cIdx].IdleTimeout) * time.Second,
-					ConnectionPersistent: cfg.Proxies[cIdx].ConnectionPersistent,
-					ConnectionChannels:   cfg.Proxies[cIdx].ConnectionChannels,
+						cfg.Proxies[cIdx].Timeout) * time.Second,
+					ConnectionPersistent: cfg.Proxies[cIdx].Persistent,
+					ConnectionChannels:   cfg.Proxies[cIdx].Channels,
 				})
 			}
 
+			var accountVerifer Authenticator
+
+			if len(cfg.Account) > 0 {
+				accounts := make(map[string]string, len(cfg.Account))
+
+				for aIdx := range cfg.Account {
+					accounts[cfg.Account[aIdx].Username] =
+						cfg.Account[aIdx].Password
+				}
+
+				accountVerifer = func(username, password string) error {
+					aPass, aFound := accounts[username]
+
+					if !aFound {
+						return errors.New("Socks5 Account was not found")
+					}
+
+					if aPass != password {
+						return errors.New("Socks5 Account password mismatch")
+					}
+
+					return nil
+				}
+			}
+
 			return New(clients, listen, log, Config{
-				MaxConnections: cfg.MaxConnections,
+				Capacity: cfg.Capacity,
 				NegotiationTimeout: time.Duration(
 					cfg.InitialTimeout) * time.Second,
 				ConnectionTimeout: time.Duration(
-					cfg.IdleTimeout) * time.Second,
+					cfg.Timeout) * time.Second,
 				MaxDestinationRecords: 8192,
-				Authenticator:         nil,
+				Authenticator:         accountVerifer,
 			}), nil
 		},
 	}

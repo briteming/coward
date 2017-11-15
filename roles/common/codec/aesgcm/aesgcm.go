@@ -25,41 +25,46 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"errors"
 	"io"
 	"sync"
 
 	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/codec/key"
 	"github.com/reinit/coward/roles/common/codec/marker"
+	"github.com/reinit/coward/roles/common/transceiver"
 )
 
 const (
-	nonceSize        = 12
-	maxDataBlockSize = 4096
+	nonceSize           = 12
+	maxDataBlockSize    = 4096
+	maxPaddingBlockSize = 32
 )
 
 // Errors
 var (
-	ErrDataBlockTooLarge = errors.New(
+	ErrDataBlockTooLarge = transceiver.NewCodecError(
 		"AES-GCM Data block too large, decode refused")
 
-	ErrInvalidSizeDataLength = errors.New(
+	ErrPaddingBlockTooLarge = transceiver.NewCodecError(
+		"AES-GCM Padding block too large, decode refused")
+
+	ErrInvalidSizeDataLength = transceiver.NewCodecError(
 		"The length information of size data is invalid")
 )
 
 type aesgcm struct {
 	rw                   io.ReadWriter
 	block                cipher.Block
+	encrypter            cipher.AEAD
+	encrypterInited      bool
+	encrypterNonceBuf    [nonceSize]byte
+	encrypterPaddingBuf  [maxPaddingBlockSize]byte
 	decrypter            cipher.AEAD
 	decrypterInited      bool
 	decryptBuf           []byte
 	decryptCipherTextBuf []byte
 	decryptReader        *bytes.Reader
 	decryptNonceBuf      [nonceSize]byte
-	encrypter            cipher.AEAD
-	encrypterInited      bool
-	encrypterNonceBuf    [nonceSize]byte
 	decryptMarker        marker.Marker
 	decryptMarkerLock    *sync.Mutex
 }
@@ -101,18 +106,32 @@ func AESGCM(
 	return &aesgcm{
 		rw:                   conn,
 		block:                blockCipher,
+		encrypter:            gcmEncrypter,
+		encrypterInited:      false,
+		encrypterNonceBuf:    [nonceSize]byte{},
+		encrypterPaddingBuf:  [maxPaddingBlockSize]byte{},
 		decrypter:            gcmDecrypter,
 		decrypterInited:      false,
 		decryptBuf:           nil,
 		decryptCipherTextBuf: nil,
 		decryptReader:        bytes.NewReader(nil),
 		decryptNonceBuf:      [nonceSize]byte{},
-		encrypter:            gcmEncrypter,
-		encrypterInited:      false,
-		encrypterNonceBuf:    [nonceSize]byte{},
 		decryptMarker:        mark,
 		decryptMarkerLock:    markLock,
 	}, nil
+}
+
+func (a *aesgcm) nonceIncreament(nonce []byte) {
+	// Do a increament in reversed byte order
+	for nIdx := range nonce {
+		if nonce[nIdx] < 255 {
+			nonce[nIdx]++
+
+			break
+		}
+
+		nonce[nIdx] = 0
+	}
 }
 
 func (a *aesgcm) Read(b []byte) (int, error) {
@@ -136,7 +155,7 @@ func (a *aesgcm) Read(b []byte) (int, error) {
 		a.decrypterInited = true
 	}
 
-	sizeCipherTextReadLen := a.decrypter.Overhead() + 2
+	sizeCipherTextReadLen := a.decrypter.Overhead() + 3
 
 	if len(a.decryptCipherTextBuf) < sizeCipherTextReadLen {
 		a.decryptCipherTextBuf = make([]byte, sizeCipherTextReadLen)
@@ -156,10 +175,10 @@ func (a *aesgcm) Read(b []byte) (int, error) {
 		nil)
 
 	if sizeDataOpenErr != nil {
-		return 0, sizeDataOpenErr
+		return 0, transceiver.WrapCodecError(sizeDataOpenErr)
 	}
 
-	if len(sizeData) != 2 {
+	if len(sizeData) != 3 {
 		return 0, ErrInvalidSizeDataLength
 	}
 
@@ -171,6 +190,35 @@ func (a *aesgcm) Read(b []byte) (int, error) {
 
 	if size > maxDataBlockSize {
 		return 0, ErrDataBlockTooLarge
+	}
+
+	// Got some padding to read?
+	if sizeData[2] > 0 {
+		if sizeData[2] > maxPaddingBlockSize {
+			return 0, ErrPaddingBlockTooLarge
+		}
+
+		paddingReadLen := a.decrypter.Overhead() + int(sizeData[2])
+
+		if len(a.decryptCipherTextBuf) < paddingReadLen {
+			a.decryptCipherTextBuf = make([]byte, paddingReadLen)
+		}
+
+		_, rErr = io.ReadFull(a.rw, a.decryptCipherTextBuf[:paddingReadLen])
+
+		if rErr != nil {
+			return 0, rErr
+		}
+
+		_, paddingOpenErr := a.decrypter.Open(
+			nil,
+			a.decryptNonceBuf[:],
+			a.decryptCipherTextBuf[:paddingReadLen],
+			nil)
+
+		if paddingOpenErr != nil {
+			return 0, paddingOpenErr
+		}
 	}
 
 	actualCipherTextReadLen := a.decrypter.Overhead() + int(size)
@@ -193,9 +241,10 @@ func (a *aesgcm) Read(b []byte) (int, error) {
 		nil)
 
 	if dataOpenErr != nil {
-		return 0, dataOpenErr
+		return 0, transceiver.WrapCodecError(dataOpenErr)
 	}
 
+	a.nonceIncreament(a.decryptNonceBuf[:])
 	a.decryptReader = bytes.NewReader(dataData)
 
 	return a.decryptReader.Read(b)
@@ -220,7 +269,15 @@ func (a *aesgcm) Write(b []byte) (int, error) {
 
 	bLen := len(b)
 	start := 0
-	sizeBuf := [2]byte{}
+	sizeBuf := [3]byte{}
+
+	_, paddingSizeReadErr := rand.Read(sizeBuf[2:])
+
+	if paddingSizeReadErr != nil {
+		return 0, paddingSizeReadErr
+	}
+
+	sizeBuf[2] %= maxPaddingBlockSize
 
 	for start < bLen {
 		end := start + maxDataBlockSize
@@ -233,21 +290,55 @@ func (a *aesgcm) Write(b []byte) (int, error) {
 		sizeBuf[0] = byte(uint16(writeLen) >> 8)
 		sizeBuf[1] = byte((uint16(writeLen) << 8) >> 8)
 
-		_, rErr := rw.WriteFull(a.rw, a.encrypter.Seal(
+		_, wErr := rw.WriteFull(a.rw, a.encrypter.Seal(
 			nil, a.encrypterNonceBuf[:], sizeBuf[:], nil))
 
-		if rErr != nil {
-			return start, rErr
+		if wErr != nil {
+			return start, wErr
 		}
 
-		_, rErr = rw.WriteFull(a.rw, a.encrypter.Seal(
+		// Notice the padding may not apply to the data block at all
+		if sizeBuf[2] > 0 {
+			_, rErr := rand.Read(a.encrypterPaddingBuf[:sizeBuf[2]])
+
+			if rErr != nil {
+				return start, rErr
+			}
+
+			_, wErr = rw.WriteFull(a.rw, a.encrypter.Seal(
+				nil, a.encrypterNonceBuf[:],
+				a.encrypterPaddingBuf[:sizeBuf[2]],
+				nil))
+
+			if wErr != nil {
+				return start, wErr
+			}
+
+			if a.encrypterPaddingBuf[0] > 0 {
+				sizeBuf[2] %= a.encrypterPaddingBuf[0]
+			} else {
+				sizeBuf[2] = 0
+			}
+		} else {
+			_, paddingSizeReadErr := rand.Read(sizeBuf[2:])
+
+			if paddingSizeReadErr != nil {
+				return 0, paddingSizeReadErr
+			}
+
+			sizeBuf[2] %= maxPaddingBlockSize
+		}
+
+		_, wErr = rw.WriteFull(a.rw, a.encrypter.Seal(
 			nil, a.encrypterNonceBuf[:], b[start:end], nil))
 
-		if rErr != nil {
-			return start, rErr
+		if wErr != nil {
+			return start, wErr
 		}
 
 		start = end
+
+		a.nonceIncreament(a.encrypterNonceBuf[:])
 	}
 
 	return start, nil

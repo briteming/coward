@@ -24,7 +24,7 @@ import "time"
 
 // Config Socks5 configuration
 type Config struct {
-	MaxConnections        uint32
+	Capacity              uint32
 	NegotiationTimeout    time.Duration
 	ConnectionTimeout     time.Duration
 	MaxDestinationRecords int

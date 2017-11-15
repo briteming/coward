@@ -30,11 +30,11 @@ import (
 
 // Mapped Item
 type Mapped struct {
-	ID              proxycomm.MapID
-	Protocol        network.Protocol
-	ListenInterface net.IP
-	ListenPort      uint16
-	MaxConnections  uint32
+	ID        proxycomm.MapID
+	Protocol  network.Protocol
+	Interface net.IP
+	Port      uint16
+	Capicty   uint32
 }
 
 // Config Configuration

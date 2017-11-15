@@ -22,6 +22,7 @@ package server
 
 import (
 	"errors"
+	"io"
 	"strconv"
 	"time"
 
@@ -117,9 +118,22 @@ func (s *server) Handle(
 		channelID, machine, chGetErr := channelized.Dispatch(channels)
 
 		if chGetErr != nil {
+			connErr, isConnErr := chGetErr.(connection.Error)
+
+			if isConnErr {
+				switch connErr.Get() {
+				case io.EOF: // Oh EOF. Bye!
+
+				default:
+					log.Warningf("Dispatch has failed: %s", chGetErr)
+				}
+			} else {
+				log.Warningf("Dispatch has failed: %s", chGetErr)
+			}
+
 			// If dispatch has failed, no reason to keep the client
 			// connected.
-			// In fact, we had to disconnect the client as when dispatch
+			// In fact, we has to disconnect the client as when dispatch
 			// has failed, the Client <--> Server status sync will be
 			// broken.
 			return chGetErr
@@ -156,12 +170,12 @@ func (s *server) Handle(
 			}
 		}
 
-		_, isConnErr := tickErr.(connection.Error)
+		switch tickErr.(type) {
+		case connection.Error:
+			return tickErr
 
-		if !isConnErr {
-			continue
+		case transceiver.CodecError:
+			return tickErr
 		}
-
-		return tickErr
 	}
 }

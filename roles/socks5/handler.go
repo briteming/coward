@@ -26,10 +26,12 @@ import (
 	"github.com/reinit/coward/common/corunner"
 	"github.com/reinit/coward/common/fsm"
 	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/network/server"
 	"github.com/reinit/coward/roles/common/transceiver"
 	"github.com/reinit/coward/roles/socks5/common"
+	"github.com/reinit/coward/roles/socks5/request"
 )
 
 type handler struct {
@@ -131,13 +133,45 @@ func (d client) Serve() error {
 	reqErr := d.transceiver.Request(
 		d.conn.RemoteAddr(), destName, req, d.conn.Closed())
 
-	if reqErr != nil {
-		d.logger.Warningf("Request has failed: %s", reqErr)
+	switch reqErr {
+	case nil:
+		d.logger.Debugf("Request completed")
+		return nil
 
-		return reqErr
+	case request.ErrConnectInvalidAddressType:
+		rw.WriteFull(d.conn, []byte{
+			0x05, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+
+	case request.ErrConnectInitialRespondUnknownError:
+		fallthrough
+	case request.ErrConnectInitialRespondGeneralError:
+		rw.WriteFull(d.conn, []byte{
+			0x05, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+
+	case request.ErrConnectInitialRespondAccessDeined:
+		rw.WriteFull(d.conn, []byte{
+			0x05, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+
+	case request.ErrConnectInitialRespondTargetUnreachable:
+		rw.WriteFull(d.conn, []byte{
+			0x05, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+
+	case request.ErrUDPServerInvalidLocalAddr:
+		rw.WriteFull(d.conn, []byte{
+			0x05, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+
+	case request.ErrUDPServerFailedToListen:
+		fallthrough
+	case request.ErrUDPInvalidRequest:
+		fallthrough
+	case request.ErrUDPServerRelayFailed:
+		fallthrough
+	case request.ErrUDPUnknownError:
+		rw.WriteFull(d.conn, []byte{
+			0x05, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
 	}
 
-	d.logger.Debugf("Request completed")
+	d.logger.Warningf("Request has failed: %s", reqErr)
 
 	return reqErr
 }

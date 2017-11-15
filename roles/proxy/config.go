@@ -36,7 +36,7 @@ type Mapped struct {
 
 // Config of the Proxy
 type Config struct {
-	MaxConnections       uint32
+	Capacity             uint32
 	InitialTimeout       time.Duration
 	IdleTimeout          time.Duration
 	ConnectionChannels   uint8
