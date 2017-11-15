@@ -49,7 +49,7 @@ type Mapped struct {
 }
 
 // Mapping contains Mapped Items
-type Mapping [256]*Mapped
+type Mapping [MaxMapID + 1]*Mapped
 
 // Get returns the Mapped Item
 func (m Mapping) Get(id MapID) (*Mapped, error) {

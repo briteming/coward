@@ -23,6 +23,8 @@ package udp
 import (
 	"errors"
 	"sync"
+
+	"github.com/reinit/coward/roles/common/network"
 )
 
 // Errors
@@ -32,7 +34,7 @@ var (
 )
 
 type clients struct {
-	clients map[ipport]*conn
+	clients map[network.ConnectionID]*conn
 	lock    sync.Mutex
 	maxSize uint32
 }
@@ -44,7 +46,10 @@ func (c *clients) Size() uint32 {
 	return uint32(len(c.clients))
 }
 
-func (c *clients) Fetch(ipPort ipport, run func(*conn), builder func() *conn) {
+func (c *clients) Fetch(
+	ipPort network.ConnectionID,
+	run func(*conn), builder func() *conn,
+) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -59,7 +64,10 @@ func (c *clients) Fetch(ipPort ipport, run func(*conn), builder func() *conn) {
 	run(client)
 }
 
-func (c *clients) Delete(ipPort ipport, callback func() error) error {
+func (c *clients) Delete(
+	ipPort network.ConnectionID,
+	callback func() error,
+) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -78,12 +86,13 @@ func (c *clients) Clear(clear func(*conn)) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	clientKeys := make([]ipport, len(c.clients))
+	clientKeys := make([]network.ConnectionID, len(c.clients))
 	clientIndex := 0
 
-	for k := range c.clients {
-		clientKeys[clientIndex] = k
+	for k, cc := range c.clients {
+		clear(cc)
 
+		clientKeys[clientIndex] = k
 		clientIndex++
 	}
 

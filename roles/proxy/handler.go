@@ -21,11 +21,10 @@
 package proxy
 
 import (
-	"github.com/reinit/coward/common/corunner"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/roles/common/command"
 	"github.com/reinit/coward/roles/common/network"
-	"github.com/reinit/coward/roles/common/network/server"
 	"github.com/reinit/coward/roles/common/transceiver"
 	"github.com/reinit/coward/roles/proxy/common"
 	"github.com/reinit/coward/roles/proxy/request"
@@ -33,7 +32,7 @@ import (
 
 type handler struct {
 	transceiver transceiver.Server
-	runner      corunner.Runner
+	runner      worker.Runner
 	mapping     common.Mapping
 	cfg         Config
 }
@@ -43,14 +42,14 @@ type client struct {
 	logger      logger.Logger
 	mapping     common.Mapping
 	transceiver transceiver.Server
-	runner      corunner.Runner
+	runner      worker.Runner
 	cfg         Config
 }
 
 func (d handler) New(
 	c network.Connection,
 	l logger.Logger,
-) (server.Client, error) {
+) (network.Client, error) {
 	return client{
 		conn:        c,
 		logger:      l,
@@ -70,6 +69,7 @@ func (d client) Serve() error {
 		command.New(
 			request.TCPIPv4{
 				TCP: request.TCP{
+					Logger:            d.logger,
 					Runner:            d.runner,
 					Buffer:            buf[:],
 					DialTimeout:       d.cfg.InitialTimeout,
@@ -80,6 +80,7 @@ func (d client) Serve() error {
 			},
 			request.TCPIPv6{
 				TCP: request.TCP{
+					Logger:            d.logger,
 					Runner:            d.runner,
 					Buffer:            buf[:],
 					DialTimeout:       d.cfg.InitialTimeout,
@@ -90,6 +91,7 @@ func (d client) Serve() error {
 			},
 			request.TCPHost{
 				TCP: request.TCP{
+					Logger:            d.logger,
 					Runner:            d.runner,
 					Buffer:            buf[:],
 					DialTimeout:       d.cfg.InitialTimeout,
@@ -100,6 +102,7 @@ func (d client) Serve() error {
 			},
 			request.TCPMapping{
 				TCP: request.TCP{
+					Logger:            d.logger,
 					Runner:            d.runner,
 					Buffer:            buf[:],
 					DialTimeout:       d.cfg.InitialTimeout,
@@ -110,12 +113,14 @@ func (d client) Serve() error {
 				Mapping: d.mapping,
 			},
 			request.UDP{
+				Logger:    d.logger,
 				Runner:    d.runner,
 				Buffer:    buf[:],
 				Cancel:    d.conn.Closed(),
 				LocalAddr: d.conn.LocalAddr(),
 			},
 			request.UDPMapping{
+				Logger:      d.logger,
 				Runner:      d.runner,
 				Buffer:      buf[:],
 				Cancel:      d.conn.Closed(),

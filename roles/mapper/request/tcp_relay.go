@@ -24,6 +24,8 @@ import (
 	"errors"
 	"io"
 
+	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/relay"
 	proxycommon "github.com/reinit/coward/roles/proxy/common"
 	"github.com/reinit/coward/roles/proxy/request"
@@ -57,8 +59,9 @@ type tcpRelay struct {
 	client io.ReadWriteCloser
 }
 
-func (c tcpRelay) Initialize(server relay.Server) error {
-	_, wErr := server.Write([]byte{request.TCPCommandMapping, byte(c.mapper)})
+func (c tcpRelay) Initialize(l logger.Logger, server relay.Server) error {
+	_, wErr := rw.WriteFull(
+		server, []byte{request.TCPCommandMapping, byte(c.mapper)})
 
 	if wErr != nil {
 		return wErr
@@ -107,6 +110,7 @@ func (c tcpRelay) Initialize(server relay.Server) error {
 	return initError
 }
 
-func (c tcpRelay) Client(server relay.Server) (io.ReadWriteCloser, error) {
+func (c tcpRelay) Client(
+	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
 	return c.client, nil
 }

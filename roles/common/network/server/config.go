@@ -22,11 +22,8 @@ package server
 
 import "time"
 
-// Config is the Configuration of Server
+// Config Server Configuration
 type Config struct {
-	MaxWorkers         uint32
-	MinWorkers         uint32
-	MaxWorkerIdle      time.Duration
-	AcceptErrorWait    time.Duration
-	AcceptorPerWorkers uint32
+	AcceptErrorWait time.Duration
+	MaxConnections  uint32
 }

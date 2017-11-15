@@ -29,6 +29,7 @@ const (
 // average implements Timer
 type average struct {
 	slots       [maxAvgSlots]time.Duration
+	avgFactor   time.Duration
 	currentSlot int
 	total       time.Duration
 	avg         time.Duration
@@ -44,6 +45,7 @@ type averageStopper struct {
 func Average() Timer {
 	return &average{
 		slots:       [maxAvgSlots]time.Duration{},
+		avgFactor:   0,
 		currentSlot: 0,
 		total:       0,
 		avg:         0,
@@ -68,18 +70,23 @@ func (t *average) Reset() {
 	t.total = 0
 	t.avg = 0
 	t.slots = [maxAvgSlots]time.Duration{}
+	t.avgFactor = 0
 }
 
 // Stop stops current timer and returns the average time
 func (s averageStopper) Stop() time.Duration {
 	resultTime := time.Now().Sub(s.startTime)
 
+	if maxAvgSlots > s.average.avgFactor {
+		s.average.avgFactor++
+	}
+
 	s.average.total -= s.average.slots[s.average.currentSlot]
 
 	s.average.slots[s.average.currentSlot] = resultTime
 	s.average.total += resultTime
 
-	s.average.avg = s.average.total / maxAvgSlots
+	s.average.avg = s.average.total / s.average.avgFactor
 
 	s.average.currentSlot++
 	s.average.currentSlot %= maxAvgSlots

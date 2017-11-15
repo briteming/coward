@@ -23,12 +23,11 @@ package socks5
 import (
 	"time"
 
-	"github.com/reinit/coward/common/corunner"
 	"github.com/reinit/coward/common/fsm"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/network"
-	"github.com/reinit/coward/roles/common/network/server"
 	"github.com/reinit/coward/roles/common/transceiver"
 	"github.com/reinit/coward/roles/socks5/common"
 	"github.com/reinit/coward/roles/socks5/request"
@@ -36,7 +35,7 @@ import (
 
 type handler struct {
 	cfg           Config
-	runner        corunner.Runner
+	runner        worker.Runner
 	shb           *common.SharedBuffers
 	transceiver   transceiver.Balanced
 	negoTimeout   time.Duration
@@ -53,13 +52,13 @@ type client struct {
 	timeout       time.Duration
 	shb           *common.SharedBuffers
 	authenticator Authenticator
-	runner        corunner.Runner
+	runner        worker.Runner
 }
 
 func (d handler) New(
 	c network.Connection,
 	l logger.Logger,
-) (server.Client, error) {
+) (network.Client, error) {
 	return client{
 		conn:          c,
 		logger:        l,
@@ -131,7 +130,7 @@ func (d client) Serve() error {
 	d.conn.SetTimeout(d.timeout)
 
 	reqErr := d.transceiver.Request(
-		d.conn.RemoteAddr(), destName, req, d.conn.Closed())
+		d.logger, destName, req, d.conn.Closed())
 
 	switch reqErr {
 	case nil:

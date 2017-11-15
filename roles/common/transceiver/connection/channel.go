@@ -191,15 +191,11 @@ func (c *channelize) Dispatch(channels ch.Channels) (ch.ID, fsm.FSM, error) {
 	select {
 	case c.dispatchCompleted <- struct{}{}:
 
-	case _, ok := <-c.conn.Closed():
+	case <-c.conn.Closed():
 		if c.dispatchCompleted != nil {
 			close(c.dispatchCompleted)
 
 			c.dispatchCompleted = nil
-		}
-
-		if !ok {
-			return 0, nil, ErrChannelConnectionDropped
 		}
 
 		return 0, nil, ErrChannelConnectionDropped
@@ -252,16 +248,12 @@ func (c *channelize) Dispatch(channels ch.Channels) (ch.ID, fsm.FSM, error) {
 		Complete:   c.dispatchCompleted}:
 		return ch.ID(c.buf[0]), machine, nil
 
-	case _, ok := <-c.conn.Closed():
+	case <-c.conn.Closed():
 		if c.dispatchCompleted != nil {
 			<-c.dispatchCompleted
 
 			close(c.dispatchCompleted)
 			c.dispatchCompleted = nil
-		}
-
-		if !ok {
-			return 0, nil, ErrChannelConnectionDropped
 		}
 
 		return 0, nil, ErrChannelConnectionDropped
@@ -418,11 +410,7 @@ func (c *channel) Read(b []byte) (int, error) {
 
 				hasReader = true
 
-			case _, ok := <-c.connClosed:
-				if !ok {
-					return 0, ErrChannelConnectionDropped
-				}
-
+			case <-c.connClosed:
 				return 0, ErrChannelConnectionDropped
 
 			case d := <-c.downSignal:

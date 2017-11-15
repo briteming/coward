@@ -18,19 +18,32 @@
 //  along with Crypto-Obscured Forwarder. If not, see
 //  <http://www.gnu.org/licenses/>.
 
-package socks5
+package project
 
-import "github.com/reinit/coward/common/timer"
+import (
+	"time"
 
-type meter struct {
-	connection timer.Timer
-	request    timer.Timer
+	"github.com/reinit/coward/roles/project/project"
+)
+
+// Endpoints is a group of Endpoints
+type Endpoints []project.Endpoint
+
+// TotalConnections returns total connections
+func (p Endpoints) TotalConnections() uint32 {
+	totalConnections := uint32(0)
+
+	for pIdx := range p {
+		totalConnections += p[pIdx].MaxConnections
+	}
+
+	return totalConnections
 }
 
-func (d meter) Connection() timer.Stopper {
-	return d.connection.Start()
-}
-
-func (d meter) Request() timer.Stopper {
-	return d.request.Start()
+// Config Projectile Configuration
+type Config struct {
+	TransceiverIdleTimeout    time.Duration
+	TransceiverInitialTimeout time.Duration
+	TransceiverChannels       uint8
+	Endpoints                 Endpoints
 }

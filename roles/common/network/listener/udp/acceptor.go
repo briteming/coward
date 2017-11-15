@@ -74,8 +74,8 @@ func (a *acceptor) Accept() (network.Connection, error) {
 			return nil, ErrTooManyClients
 		}
 
-		ipPort := ipport{}
-		ipPort.Import(rAddr.IP, uint16(rAddr.Port))
+		ipPort := network.ConnectionID(
+			a.listener.LocalAddr().String() + ":" + rAddr.String())
 
 		a.clients.Fetch(ipPort, func(cc *conn) {
 			select {
@@ -120,6 +120,12 @@ func (a *acceptor) Accept() (network.Connection, error) {
 	return selectedConn, nil
 }
 
+// Closed return whether or not current acceptor is closed
+func (a *acceptor) Closed() chan struct{} {
+	return a.closed
+}
+
+// Close closes the UDP listener
 func (a *acceptor) Close() error {
 	cErr := a.listener.Close()
 
@@ -127,11 +133,7 @@ func (a *acceptor) Close() error {
 		return cErr
 	}
 
-	select {
-	case <-a.closed:
-	default:
-		close(a.closed)
-	}
+	close(a.closed)
 
 	a.clients.Clear(func(cc *conn) {
 		cc.Kick()

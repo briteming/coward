@@ -18,18 +18,38 @@
 //  along with Crypto-Obscured Forwarder. If not, see
 //  <http://www.gnu.org/licenses/>.
 
-package server
+package projection
 
-import "errors"
-
-// Errors
-var (
-	ErrAlreadyServing = errors.New(
-		"Server already serving")
-
-	ErrAlreadyClosed = errors.New(
-		"Server already closed")
-
-	ErrAcceptorTooBusy = errors.New(
-		"Server is too busy to accept new connections")
+import (
+	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/roles/common/network"
 )
+
+// handler Projection handler
+type handler struct {
+	projection *projection
+}
+
+// client Projection client
+type client struct {
+	projection *projection
+	c          network.Connection
+	l          logger.Logger
+}
+
+// New creates a new Projection client
+func (d handler) New(
+	c network.Connection,
+	l logger.Logger,
+) (network.Client, error) {
+	return client{
+		projection: d.projection,
+		c:          c,
+		l:          l,
+	}, nil
+}
+
+// Serve start serving projection
+func (d client) Serve() error {
+	return d.projection.Receive(d.c)
+}

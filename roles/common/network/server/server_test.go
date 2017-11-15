@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/roles/common/network"
 )
@@ -35,18 +36,20 @@ type dummyIncoming struct{}
 func (d *dummyIncoming) New(
 	conn network.Connection,
 	log logger.Logger,
-) (Client, error) {
+) (network.Client, error) {
 	return nil, nil
 }
 
 type dummyListener struct{}
 type dummyAcceptor struct {
 	acceptErrChan chan error
+	closed        chan struct{}
 }
 
 func (d *dummyListener) Listen() (network.Acceptor, error) {
 	return &dummyAcceptor{
 		acceptErrChan: make(chan error),
+		closed:        make(chan struct{}),
 	}, nil
 }
 
@@ -63,18 +66,33 @@ func (d *dummyAcceptor) Accept() (network.Connection, error) {
 }
 
 func (d *dummyAcceptor) Close() error {
+	close(d.closed)
 	d.acceptErrChan <- io.EOF
 
 	return nil
 }
 
+func (d *dummyAcceptor) Closed() chan struct{} {
+	return d.closed
+}
+
 func TestServerUpDown(t *testing.T) {
-	s := New(&dummyListener{}, &dummyIncoming{}, logger.NewDitch(), Config{
-		MaxWorkers:         1024,
-		MinWorkers:         32,
-		MaxWorkerIdle:      10 * time.Second,
-		AcceptErrorWait:    1 * time.Second,
-		AcceptorPerWorkers: 1000,
+	r, rErr := worker.New(logger.NewDitch(), worker.Config{
+		MaxWorkers:        1024,
+		MinWorkers:        32,
+		MaxWorkerIdle:     10 * time.Second,
+		JobReceiveTimeout: 5 * time.Second,
+	}).Serve()
+
+	if rErr != nil {
+		t.Error("Failed to start runner due to error:", rErr)
+
+		return
+	}
+
+	s := New(&dummyListener{}, &dummyIncoming{}, logger.NewDitch(), r, Config{
+		AcceptErrorWait: 1 * time.Second,
+		MaxConnections:  1024,
 	})
 
 	for i := 0; i < 100; i++ {

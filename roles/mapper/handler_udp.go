@@ -23,11 +23,10 @@ package mapper
 import (
 	"time"
 
-	"github.com/reinit/coward/common/corunner"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/timer"
 	"github.com/reinit/coward/roles/common/network"
-	"github.com/reinit/coward/roles/common/network/server"
 	"github.com/reinit/coward/roles/common/transceiver"
 	"github.com/reinit/coward/roles/mapper/common"
 	"github.com/reinit/coward/roles/mapper/request"
@@ -37,7 +36,7 @@ import (
 type udpHandler struct {
 	mapper      proxycommon.MapID
 	cfg         Config
-	runner      corunner.Runner
+	runner      worker.Runner
 	shb         *common.SharedBuffer
 	transceiver transceiver.Requester
 	timeout     time.Duration
@@ -51,13 +50,13 @@ type udpClient struct {
 	transceiver transceiver.Requester
 	timeout     time.Duration
 	shb         *common.SharedBuffer
-	runner      corunner.Runner
+	runner      worker.Runner
 }
 
 func (d udpHandler) New(
 	c network.Connection,
 	l logger.Logger,
-) (server.Client, error) {
+) (network.Client, error) {
 	return udpClient{
 		mapper:      d.mapper,
 		conn:        c,
@@ -82,7 +81,7 @@ func (d udpClient) Serve() error {
 	}
 
 	_, reqErr := d.transceiver.Request(
-		d.conn.RemoteAddr(),
+		d.logger,
 		request.UDP(d.mapper, d.conn, d.runner, d.shb),
 		d.conn.Closed(), metering)
 

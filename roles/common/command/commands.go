@@ -64,6 +64,11 @@ func New(cmds ...Command) Commands {
 	c := commands{}
 
 	for cmdIdx := range cmds {
+		if cmds[cmdIdx].ID() >= MaxCommands {
+			panic(fmt.Sprintf("Command ID cannot be greater than %d",
+				MaxCommands))
+		}
+
 		if c[cmds[cmdIdx].ID()] != nil {
 			panic(fmt.Sprintf("Command %d already existed", cmds[cmdIdx].ID()))
 		}

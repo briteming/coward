@@ -34,7 +34,21 @@ type Mapped struct {
 	Protocol  network.Protocol
 	Interface net.IP
 	Port      uint16
-	Capicty   uint32
+	Capacity  uint32
+}
+
+// Mappeds a group of Mapped
+type Mappeds []Mapped
+
+// TotalCapacity get total capacity of all Mapped
+func (m Mappeds) TotalCapacity() uint32 {
+	totalCap := uint32(0)
+
+	for k := range m {
+		totalCap += m[k].Capacity
+	}
+
+	return totalCap
 }
 
 // Config Configuration
@@ -45,5 +59,5 @@ type Config struct {
 	TransceiverIdleTimeout          time.Duration
 	TransceiverInitialTimeout       time.Duration
 	TransceiverChannels             uint8
-	Mapping                         []Mapped
+	Mapping                         Mappeds
 }

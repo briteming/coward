@@ -41,6 +41,7 @@ type acceptor struct {
 	listener          *net.TCPListener
 	timeout           time.Duration
 	connectionWrapper network.ConnectionWrapper
+	closed            chan struct{}
 }
 
 // New creates a new TCP listener
@@ -74,6 +75,7 @@ func (t listener) Listen() (network.Acceptor, error) {
 		listener:          listener,
 		timeout:           t.timeout,
 		connectionWrapper: t.connectionWrapper,
+		closed:            make(chan struct{}),
 	}, nil
 }
 
@@ -109,7 +111,14 @@ func (a acceptor) Accept() (network.Connection, error) {
 	return connection, nil
 }
 
+// Closed return whether or not current acceptor is closed
+func (a acceptor) Closed() chan struct{} {
+	return a.closed
+}
+
 // Close closes the TCP listener
 func (a acceptor) Close() error {
+	close(a.closed)
+
 	return a.listener.Close()
 }

@@ -29,8 +29,7 @@ import (
 
 func TestDestination(t *testing.T) {
 	reqs := requesters{
-		req:        make([]*requester, 3),
-		lastUpdate: time.Now(),
+		req: make([]*requester, 3),
 	}
 	prios := make(priorities, 3)
 
@@ -41,7 +40,7 @@ func TestDestination(t *testing.T) {
 
 	examples := []example{
 		example{
-			reqDelay:   6 * time.Second,
+			reqDelay:   7 * time.Second,
 			priosDelay: 6 * time.Second,
 		},
 		example{
@@ -69,12 +68,11 @@ func TestDestination(t *testing.T) {
 	}
 
 	d := destination{
-		Priorities:           prios,
-		ExpirerIndex:         0,
-		LastPrioritiesUpdate: time.Time{},
+		Priorities:   prios,
+		ExpirerIndex: 0,
 	}
 
-	d.Renew(&reqs)
+	d.Renew()
 
 	expected := []transceiver.ClientID{1, 2, 0}
 	result := make([]transceiver.ClientID, 3)

@@ -24,6 +24,8 @@ import (
 	"errors"
 	"io"
 
+	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/relay"
 	proxycommon "github.com/reinit/coward/roles/proxy/common"
 	"github.com/reinit/coward/roles/proxy/request"
@@ -60,8 +62,9 @@ type udpRelay struct {
 	client io.ReadWriteCloser
 }
 
-func (c udpRelay) Initialize(server relay.Server) error {
-	_, wErr := server.Write([]byte{request.UDPCommandTransport, byte(c.mapper)})
+func (c udpRelay) Initialize(l logger.Logger, server relay.Server) error {
+	_, wErr := rw.WriteFull(
+		server, []byte{request.UDPCommandTransport, byte(c.mapper)})
 
 	if wErr != nil {
 		return wErr
@@ -110,6 +113,7 @@ func (c udpRelay) Initialize(server relay.Server) error {
 	return initError
 }
 
-func (c udpRelay) Client(server relay.Server) (io.ReadWriteCloser, error) {
+func (c udpRelay) Client(
+	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
 	return c.client, nil
 }

@@ -62,14 +62,15 @@ func (c TCPMapping) ID() command.ID {
 func (c TCPMapping) New(rw rw.ReadWriteDepleteDoner) fsm.Machine {
 	return &tcpMapping{
 		tcp: tcp{
-			rw:                rw,
+			logger:            c.Logger,
 			buf:               c.Buffer,
 			dialTimeout:       c.DialTimeout,
 			connectionTimeout: c.ConnectionTimeout,
 			runner:            c.Runner,
-			relay:             nil,
 			cancel:            c.Cancel,
 			noLocalAccess:     c.NoLocalAccess,
+			rw:                rw,
+			relay:             nil,
 		},
 		mapping: c.Mapping,
 	}
@@ -100,7 +101,7 @@ func (c *tcpMapping) Bootup() (fsm.State, error) {
 		return nil, ErrTCPMappingNotFound
 	}
 
-	c.relay = relay.New(c.runner, c.rw, c.buf, tcpRelay{
+	c.relay = relay.New(c.logger, c.runner, c.rw, c.buf, tcpRelay{
 		noLocalAccess:     c.noLocalAccess,
 		dialTimeout:       c.dialTimeout,
 		connectionTimeout: c.connectionTimeout,

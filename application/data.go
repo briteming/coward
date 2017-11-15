@@ -33,11 +33,11 @@ const (
 	helpUsage = "Usage:\r\n\r\n" +
 		"%s [Execute Options ...] <Role> [Role Options ...]\r\n"
 
-	helpUsageSlient = `-slient   Disable output`
-	helpUsageDebug  = `-debug    Enable debug output`
-	helpUsageDaemon = `-daemon   Run as daemon`
-	helpUsageLog    = `-log      Write log to a file`
-	helpUsageParam  = `-param    Load Role Options from a file`
+	helpUsageSlient = `-slient%sDisable output`
+	helpUsageDebug  = `-debug %sEnable debug output`
+	helpUsageDaemon = `-daemon%sRun as daemon`
+	helpUsageLog    = `-log   %sWrite log to a file`
+	helpUsageParam  = `-param %sLoad Role Options from a file`
 )
 
 // COWARD application errors

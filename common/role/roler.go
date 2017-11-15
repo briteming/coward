@@ -60,6 +60,7 @@ type Roler interface {
 		log logger.Logger,
 	) (Role, error)
 	List(screenOut print.Common)
+	MaxRoleNameLen() int
 }
 
 // roler implements Roler
@@ -147,6 +148,11 @@ func (r *roler) Init(
 	}
 
 	return r.init(screenOut, role, configuration, log)
+}
+
+// MaxRoleNameLen returns the length of the longest Role
+func (r *roler) MaxRoleNameLen() int {
+	return r.maxRoleNameLen
 }
 
 // Init initialize a new Role with parameter string

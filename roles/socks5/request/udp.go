@@ -23,8 +23,8 @@ package request
 import (
 	"time"
 
-	"github.com/reinit/coward/common/corunner"
 	"github.com/reinit/coward/common/fsm"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/network"
@@ -44,7 +44,7 @@ type udp struct {
 func UDP(
 	client network.Connection,
 	addr common.Address,
-	runner corunner.Runner,
+	runner worker.Runner,
 	shb *common.SharedBuffers,
 	requestTimeout time.Duration,
 ) transceiver.BalancedRequestBuilder {
@@ -56,15 +56,16 @@ func UDP(
 	) fsm.Machine {
 		return &udp{
 			log: log,
-			relay: relay.New(runner, conn, shb.For(cID).Select(id), &udpRelay{
-				client:         client,
-				addr:           addr,
-				requestTimeout: requestTimeout,
-				runner:         runner,
-				cancel:         client.Closed(),
-				udpConn:        nil,
-				comfirmData:    nil,
-			}, make([]byte, 4096)),
+			relay: relay.New(
+				log, runner, conn, shb.For(cID).Select(id), &udpRelay{
+					client:         client,
+					addr:           addr,
+					requestTimeout: requestTimeout,
+					runner:         runner,
+					cancel:         client.Closed(),
+					udpConn:        nil,
+					comfirmData:    nil,
+				}, make([]byte, 4096)),
 			cancel: client.Closed(),
 		}
 	}

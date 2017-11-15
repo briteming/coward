@@ -26,7 +26,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/reinit/coward/common/corunner"
+	"github.com/reinit/coward/common/worker"
+	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/relay"
@@ -62,13 +63,13 @@ type udpRelay struct {
 	client         network.Connection
 	addr           common.Address
 	requestTimeout time.Duration
-	runner         corunner.Runner
+	runner         worker.Runner
 	cancel         <-chan struct{}
 	udpConn        io.ReadWriteCloser
 	comfirmData    []byte
 }
 
-func (u *udpRelay) Initialize(server relay.Server) error {
+func (u *udpRelay) Initialize(l logger.Logger, server relay.Server) error {
 	spServerHost, _, spServerErr := net.SplitHostPort(
 		u.client.LocalAddr().String())
 
@@ -105,21 +106,23 @@ func (u *udpRelay) Initialize(server relay.Server) error {
 		return udpListenErr
 	}
 
-	runnerCloseResult, runErr := u.runner.Run(func() error {
-		defer udpListener.Close()
+	runnerCloseResult, runErr := u.runner.Run(
+		l.Context(udpListener.LocalAddr().String()),
+		func(l logger.Logger) error {
+			defer udpListener.Close()
 
-		holdingBuf := [1]byte{}
+			holdingBuf := [1]byte{}
 
-		for {
-			_, rErr := u.client.Read(holdingBuf[:])
+			for {
+				_, rErr := io.ReadFull(u.client, holdingBuf[:])
 
-			if rErr == nil {
-				continue
+				if rErr == nil {
+					continue
+				}
+
+				return nil
 			}
-
-			return nil
-		}
-	}, u.cancel)
+		}, u.cancel)
 
 	if runErr != nil {
 		return runErr
@@ -134,7 +137,7 @@ func (u *udpRelay) Initialize(server relay.Server) error {
 	}
 
 	// Now ask server to open a port for us
-	_, wErr := server.Write([]byte{request.UDPCommandDelegate})
+	_, wErr := rw.WriteFull(server, []byte{request.UDPCommandDelegate})
 
 	if wErr != nil {
 		u.udpConn.Close()
@@ -219,7 +222,8 @@ func (u *udpRelay) Initialize(server relay.Server) error {
 	return serverRespErr
 }
 
-func (u *udpRelay) Client(server relay.Server) (io.ReadWriteCloser, error) {
+func (u *udpRelay) Client(
+	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
 	_, wErr := rw.WriteFull(u.client, u.comfirmData)
 
 	if wErr != nil {

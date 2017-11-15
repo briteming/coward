@@ -35,10 +35,9 @@ type priority struct {
 type priorities []*priority
 
 type destination struct {
-	Priorities           priorities
-	ExpirerIndex         int
-	LastPrioritiesUpdate time.Time
-	RunningRequests      uint32
+	Priorities      priorities
+	ExpirerIndex    int
+	RunningRequests uint32
 }
 
 func (p *priority) Delay() timer.Timer {
@@ -65,17 +64,15 @@ func (d priorities) Swap(i, j int) {
 	d[i], d[j] = d[j], d[i]
 }
 
-func (d *destination) Renew(r *requesters) {
-	if !d.Outdated(r) {
+func (d *destination) Renew() {
+	if !d.Outdated() {
 		return
 	}
 
 	sort.Sort(d.Priorities)
-
-	d.LastPrioritiesUpdate = time.Now()
 }
 
-func (d *destination) Outdated(r *requesters) bool {
+func (d *destination) Outdated() bool {
 	if d.Priorities.Len() < 2 {
 		return false
 	}
@@ -84,5 +81,5 @@ func (d *destination) Outdated(r *requesters) bool {
 		return false
 	}
 
-	return r.Updated().After(d.LastPrioritiesUpdate)
+	return (d.Priorities[0].Duration() / 2) > d.Priorities[1].Duration()
 }

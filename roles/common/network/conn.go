@@ -23,12 +23,18 @@ package network
 import (
 	"net"
 	"time"
+
+	"github.com/reinit/coward/common/logger"
 )
+
+// ConnectionID is the UID of current connection
+type ConnectionID string
 
 // Connection is a network connection
 type Connection interface {
 	net.Conn
 
+	ID() ConnectionID
 	SetTimeout(timeout time.Duration)
 	SetReadTimeout(timeout time.Duration)
 	SetWriteTimeout(timeout time.Duration)
@@ -48,6 +54,7 @@ type Listener interface {
 type Acceptor interface {
 	Addr() net.Addr
 	Accept() (Connection, error)
+	Closed() chan struct{}
 	Close() error
 }
 
@@ -60,4 +67,26 @@ type Dial interface {
 // Dialer dials to the remote host
 type Dialer interface {
 	Dialer() Dial
+}
+
+// Server represents a Server which will accept and handle incomming
+// network.Connection
+type Server interface {
+	Serve() (Serving, error)
+}
+
+// Serving represents a running Server
+type Serving interface {
+	Listening() net.Addr
+	Close() error
+}
+
+// Handler is the network.Connection handler
+type Handler interface {
+	New(Connection, logger.Logger) (Client, error)
+}
+
+// Client represents a client connection
+type Client interface {
+	Serve() error
 }

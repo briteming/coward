@@ -18,17 +18,12 @@
 //  along with Crypto-Obscured Forwarder. If not, see
 //  <http://www.gnu.org/licenses/>.
 
-package udp
+package project
 
-import "net"
+import "time"
 
-type ipport [18]byte
-
-func (i *ipport) Import(addr net.IP, port uint16) {
-	for a := range addr {
-		i[a] = addr[a]
-	}
-
-	i[16] = byte(port >> 8)
-	i[17] = byte((port << 8) >> 8)
+// Config of Projects
+type Config struct {
+	MaxConnections uint32
+	PingTickDelay  time.Duration
 }

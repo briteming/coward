@@ -21,686 +21,307 @@
 package server
 
 import (
-	"math"
+	"errors"
 	"net"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 )
 
-// Server represents a Server which will accept and handle incomming
-// network.Connection
-type Server interface {
-	Serve() (Serving, error)
-}
+// Errors
+var (
+	ErrAlreadyServing = errors.New(
+		"Already serving")
 
-// Serving represents a running Server
-type Serving interface {
-	Listening() net.Addr
-	Close() error
-}
-
-// accept data
-type accept struct {
-	Conn   network.Connection
-	Result chan error
-}
-
-// kill data
-type kill struct {
-	Done chan struct{}
-}
-
-// serving contains information that describe a serving Server
-type serving struct {
-	Server   *server
-	Accepter network.Acceptor
-	Kills    []chan kill
-}
-
-// client information
-type client struct {
-	Conn   network.Connection
-	Closed bool
-}
-
-// pick contains client information for worker to pick up
-type pick struct {
-	Conn  network.Connection
-	Leave chan network.Connection
-}
-
-// minIdleCheckDelay delay of Idle check
-const minIdleCheckDelay = 300 * time.Second
-
-// occupation status
-type occupation uint8
-
-// defined occupation status
-const (
-	oDestroyed  occupation = 0
-	oOccupied   occupation = 1
-	oUnoccupied occupation = 2
+	ErrNotServing = errors.New(
+		"Not serving")
 )
 
-// server implements Server
-type server struct {
-	cfg                       Config
-	listener                  network.Listener
-	Handler                   Handler
-	logger                    logger.Logger
-	pick                      chan pick
-	accept                    chan accept
-	serverCloser              chan struct{}
-	serverCloseWaiter         sync.WaitGroup
-	lastWorkerID              uint64
-	workerStarted             uint32
-	workerOccupied            uint32
-	workerOccupy              chan occupation
-	workerCreation            chan chan struct{}
-	workerCloser              chan struct{}
-	workerProducerCloser      chan struct{}
-	workerIdle                chan struct{}
-	workerCloseWaiter         sync.WaitGroup
-	workerProducerCloseWaiter sync.WaitGroup
-	acceptorCloser            chan struct{}
-	acceptorCloseWaiter       sync.WaitGroup
-	serving                   bool
-	servingLock               sync.Mutex
+// client registeration data
+type client struct {
+	Connection network.Connection
+	Result     chan error
 }
 
-// New creates a new Server
+// leave connection unregisteration request
+type leave struct {
+	ID         string
+	Connection network.Connection
+}
+
+// server implements network.Server
+type server struct {
+	listener   network.Listener
+	handler    network.Handler
+	logger     logger.Logger
+	runner     worker.Runner
+	cfg        Config
+	accept     chan network.Connection
+	leave      chan leave
+	serving    bool
+	downLock   sync.Mutex
+	downWait   sync.WaitGroup
+	downNotify chan struct{}
+}
+
+type serving struct {
+	accepter network.Acceptor
+	server   *server
+}
+
+// New creates a new network.Server
 func New(
 	listener network.Listener,
-	Handler Handler,
+	handler network.Handler,
 	logger logger.Logger,
+	runner worker.Runner,
 	cfg Config,
-) Server {
-	s := &server{
-		cfg:                       cfg,
-		listener:                  listener,
-		Handler:                   Handler,
-		logger:                    logger.Context("Server"),
-		pick:                      make(chan pick),
-		accept:                    make(chan accept),
-		serverCloser:              make(chan struct{}, 1),
-		serverCloseWaiter:         sync.WaitGroup{},
-		lastWorkerID:              0,
-		workerStarted:             0,
-		workerOccupied:            0,
-		workerOccupy:              make(chan occupation),
-		workerCreation:            make(chan chan struct{}, 1),
-		workerCloser:              make(chan struct{}, 1),
-		workerProducerCloser:      make(chan struct{}),
-		workerIdle:                make(chan struct{}),
-		workerCloseWaiter:         sync.WaitGroup{},
-		workerProducerCloseWaiter: sync.WaitGroup{},
-		acceptorCloser:            make(chan struct{}, 1),
-		acceptorCloseWaiter:       sync.WaitGroup{},
-		serving:                   false,
-		servingLock:               sync.Mutex{},
+) network.Server {
+	return &server{
+		listener:   listener,
+		handler:    handler,
+		logger:     logger.Context("Server (" + listener.String() + ")"),
+		runner:     runner,
+		cfg:        cfg,
+		accept:     make(chan network.Connection),
+		leave:      make(chan leave, cfg.MaxConnections),
+		serving:    false,
+		downLock:   sync.Mutex{},
+		downNotify: make(chan struct{}, 1),
+		downWait:   sync.WaitGroup{},
 	}
-
-	s.acceptorCloser <- struct{}{}
-
-	return s
 }
 
-// producer produce and destroy idle Workers
-func (a *server) producer(minWorkers uint32) {
-	log := a.logger.Context("Producer")
-
-	idleCheckTickDelay := minIdleCheckDelay
-
-	if a.cfg.MaxWorkerIdle > idleCheckTickDelay {
-		idleCheckTickDelay = a.cfg.MaxWorkerIdle
-	}
-
-	idleCheckTicker := time.NewTicker(idleCheckTickDelay)
-	idleCheckTickChan := idleCheckTicker.C
-	nextIdleCheck := time.Now().Add(idleCheckTickDelay)
-	maxIdleRelease := minWorkers
-	shutdown := false
+// acceptor accepts connection and send them to handler
+func (s *server) acceptor() {
+	log := s.logger.Context("Acceptor")
 
 	defer func() {
-		idleCheckTicker.Stop()
-
 		log.Debugf("Closed")
 
-		a.workerProducerCloseWaiter.Done()
+		s.downWait.Done()
 	}()
+
+	downNotify := s.downNotify
+	acceptor := s.accept
+	clients := make(map[string]client, s.cfg.MaxConnections)
+	closing := false
+	currentClients := uint64(0)
+	maxClients := uint64(s.cfg.MaxConnections)
 
 	for {
 		select {
-		case <-a.workerProducerCloser:
-			if shutdown {
-				idleCheckTickChan = nil
+		case <-downNotify:
+			downNotify <- struct{}{}
 
+			downNotify = nil
+			acceptor = nil
+			closing = true
+
+			if len(clients) <= 0 {
 				return
 			}
 
-			shutdown = true
-
-		case occupy := <-a.workerOccupy:
-			switch occupy {
-			case oDestroyed:
-				a.workerStarted--
-
-			case oOccupied:
-				a.workerOccupied++
-
-				if shutdown {
-					idleCheckTickChan = nil
-
-					continue
-				}
-
-				created := a.replenishWorkers(minWorkers)
-
-				if created > 0 {
-					a.workerStarted += created
-
-					nextIdleCheck = time.Now().Add(idleCheckTickDelay)
-					maxIdleRelease = minWorkers
-
-					log.Debugf("%d new Workers has been created", created)
-				}
-
-			case oUnoccupied:
-				a.workerOccupied--
-
-				idleCheckTickChan = idleCheckTicker.C
-			}
-
-		case workerCreationDone := <-a.workerCreation:
-			// Shouldn't happen here, but I did the check anyway
-			if shutdown {
-				idleCheckTickChan = nil
-				workerCreationDone <- struct{}{}
-
-				continue
-			}
-
-			created := a.replenishWorkers(minWorkers)
-
-			if created > 0 {
-				a.workerStarted += created
-
-				nextIdleCheck = time.Now().Add(idleCheckTickDelay)
-				maxIdleRelease = minWorkers
-
-				log.Debugf("%d new Workers has been created", created)
-			}
-
-			workerCreationDone <- struct{}{}
-
-		case <-idleCheckTickChan:
-			if shutdown {
-				idleCheckTickChan = nil
-
-				continue
-			}
-
-			now := time.Now()
-
-			if now.Before(nextIdleCheck) {
-				continue
-			}
-
-			nextIdleCheck = now.Add(idleCheckTickDelay)
-
-			pendingWorkers := a.workerStarted - a.workerOccupied
-
-			if pendingWorkers <= minWorkers {
-				idleCheckTickChan = nil
-
-				continue
-			}
-
-			pendingWorkers -= minWorkers
-
-			if pendingWorkers > maxIdleRelease {
-				pendingWorkers = maxIdleRelease
-			}
-
-			idleWorkers := make([]struct{}, pendingWorkers)
-			idleWorkerReleaseCount := 0
-
-			for workerIdx := range idleWorkers {
+			for k := range clients {
 				select {
-				case i := <-a.workerIdle:
-					idleWorkers[workerIdx] = i
-					idleWorkerReleaseCount++
-
-					continue
-
+				case <-clients[k].Connection.Closed():
 				default:
+					clients[k].Connection.Close()
 				}
-
-				break
 			}
 
-			maxIdleRelease *= 2
+			log.Debugf("Closing all clients")
 
-			log.Debugf("Releasing %d idle Workers", idleWorkerReleaseCount)
-		}
-	}
-}
+		case cl := <-acceptor:
+			if currentClients >= maxClients {
+				cl.Close()
 
-// worker is the worker 'thread's
-func (a *server) worker(id uint64, ready chan<- struct{}) error {
-	log := a.logger.Context(
-		"Worker (" + strconv.FormatUint(id, 10) + ")")
-
-	defer func() {
-		if ready != nil {
-			close(ready)
-		}
-
-		log.Debugf("Closed")
-
-		a.workerOccupy <- oDestroyed
-
-		a.workerCloseWaiter.Done()
-	}()
-
-	for {
-		select {
-		case ready <- struct{}{}:
-			// Tell the creater we're ready
-			close(ready)
-
-			ready = nil
-
-		case close := <-a.workerCloser:
-			a.workerCloser <- close
-
-			return nil
-
-		case a.workerIdle <- struct{}{}:
-			log.Debugf("Idle, releasing")
-
-			return nil
-
-		case picked := <-a.pick:
-			func(p pick) {
-				a.workerOccupy <- oOccupied
-
-				defer func() {
-					a.workerOccupy <- oUnoccupied
-					p.Leave <- p.Conn
-				}()
-
-				clientLogger := log.Context(p.Conn.RemoteAddr().String())
-
-				client, clientErr := a.Handler.New(p.Conn, clientLogger)
-
-				if clientErr != nil {
-					clientLogger.Debugf(
-						"Initialization has failed due to error: %s", clientErr)
-
-					return
-				}
-
-				clientErr = client.Serve()
-
-				if clientErr != nil {
-					clientLogger.Debugf(
-						"Stopped serving the client under error: %s", clientErr)
-
-					return
-				}
-			}(picked)
-		}
-	}
-}
-
-// acceptor is a single thread that will dispatch incomming network.Connection
-// to a random free worker
-func (a *server) acceptor(id uint64, killChan chan kill) error {
-	log := a.logger.Context("Acceptor (" + strconv.FormatUint(id, 10) + ")")
-	leave := make(chan network.Connection)
-	clients := make(map[string]client, a.cfg.MaxWorkers)
-	workerCreationWaiter := make(chan struct{})
-	killed := false
-
-	defer func() {
-		log.Debugf("Closed")
-
-		close(leave)
-		close(workerCreationWaiter)
-		close(killChan)
-
-		a.acceptorCloseWaiter.Done()
-	}()
-
-	for {
-		select {
-		case close := <-a.acceptorCloser:
-			a.acceptorCloser <- close
-
-			return nil
-
-		case acc := <-a.accept:
-			if killed {
-				acc.Result <- ErrAlreadyClosed
+				log.Debugf("Failed to handle client \"%s\" because server "+
+					"has reached it's capacity", cl.RemoteAddr())
 
 				continue
 			}
 
-			remoteAddr := acc.Conn.RemoteAddr().String()
-			giveup := false
-			workerCreationRequested := false
+			connectionID := string(cl.ID()) + ":" + time.Now().String()
 
-			for !giveup {
-				select {
-				case a.pick <- pick{Conn: acc.Conn, Leave: leave}:
-					clients[remoteAddr] = client{
-						Conn:   acc.Conn,
-						Closed: false,
-					}
+			_, cliFound := clients[connectionID]
 
-					giveup = true
+			if cliFound {
+				cl.Close()
 
-					acc.Result <- nil
+				log.Debugf("Client \"%s\" already registered", cl.RemoteAddr())
 
-					log.Debugf("New connection from \"%s\"", remoteAddr)
-
-				default:
-					if !workerCreationRequested {
-						a.workerCreation <- workerCreationWaiter
-						<-workerCreationWaiter
-
-						workerCreationRequested = true
-					} else {
-						giveup = true
-
-						acc.Result <- ErrAcceptorTooBusy
-					}
-				}
+				continue
 			}
 
-		case leave := <-leave:
-			remoteAddr := leave.RemoteAddr().String()
-			requireClose := !clients[remoteAddr].Closed
-
-			delete(clients, remoteAddr)
-
-			if requireClose {
-				leave.Close()
+			h := handle{
+				ID:         connectionID,
+				Connection: cl,
+				Leave:      s.leave,
+				Handler:    s.handler,
 			}
 
-			log.Debugf("Connection to \"%s\" is closed", remoteAddr)
+			runResult, runJoinErr := s.runner.Run(
+				s.logger.Context("Client ("+cl.RemoteAddr().String()+")"),
+				h.Handle,
+				cl.Closed())
 
-		case kil := <-killChan:
-			killed = true
+			if runJoinErr != nil {
+				cl.Close()
 
-			for n, v := range clients {
-				v.Conn.Close()
-				v.Closed = true
+				log.Debugf("Failed to handle client \"%s\" due to error: %s",
+					cl.RemoteAddr(), runJoinErr)
 
-				clients[n] = v
-
-				log.Debugf("Connection to \"%s\" has been closed", n)
+				continue
 			}
 
-			kil.Done <- struct{}{}
-		}
-	}
-}
+			currentClients++
 
-// serve accepts new connections
-func (a *server) serve(listen network.Acceptor) {
-	log := a.logger.Context("Server")
+			clients[connectionID] = client{
+				Connection: cl,
+				Result:     runResult,
+			}
 
-	defer func() {
-		log.Debugf("Closed")
+			log.Debugf("New client \"%s\"", cl.RemoteAddr())
 
-		a.serverCloseWaiter.Done()
-	}()
+		case cl := <-s.leave:
+			cli, cliFound := clients[cl.ID]
 
-	for {
-		accepted, acceptErr := listen.Accept()
+			if !cliFound {
+				panic("Removing an non-existing client from clients " +
+					"record is not allowed")
+			}
 
-		if acceptErr != nil {
+			currentClients--
+
+			delete(clients, cl.ID)
+
 			select {
-			case closer := <-a.serverCloser:
-				a.serverCloser <- closer
+			case <-cl.Connection.Closed():
+			default:
+				cl.Connection.Close()
+			}
 
-				return
+			select {
+			case clErr := <-cli.Result:
+				if clErr != nil {
+					log.Debugf("Client \"%s\" is disconnected due to error: %s",
+						cl.Connection.RemoteAddr(), clErr)
+				}
 
 			default:
-				log.Warningf("Failed to accept new connection "+
-					"due to error: %s. Waiting for %s to continue",
-					acceptErr, a.cfg.AcceptErrorWait)
-
-				time.Sleep(a.cfg.AcceptErrorWait)
 			}
 
-			continue
-		}
+			log.Debugf("Client \"%s\" is disconnected",
+				cl.Connection.RemoteAddr())
 
-		joinErr := a.join(accepted)
+			if !closing {
+				continue
+			}
 
-		if joinErr == nil {
-			continue
-		}
+			if len(clients) > 0 {
+				continue
+			}
 
-		log.Warningf(
-			"Failed to accept new connection from \"%s\" due to error: %s",
-			accepted.RemoteAddr(), joinErr)
-
-		accepted.Close()
-	}
-}
-
-// accept picks up incomming network.Connection, and dispatch it to a
-// free worker
-func (a *server) join(conn network.Connection) error {
-	acc := accept{
-		Conn:   conn,
-		Result: make(chan error),
-	}
-
-	defer close(acc.Result)
-
-	select {
-	case a.accept <- acc:
-		return <-acc.Result
-
-	case closer := <-a.acceptorCloser:
-		a.acceptorCloser <- closer
-
-		return ErrAlreadyClosed
-	}
-}
-
-// startWorkers spawns workers
-func (a *server) startWorkers(num uint32) {
-	for wIndex := uint32(0); wIndex < num; wIndex++ {
-		a.workerCloseWaiter.Add(1)
-
-		ready := make(chan struct{})
-
-		go a.worker(a.lastWorkerID, ready)
-
-		<-ready
-
-		a.lastWorkerID++
-
-		if a.lastWorkerID >= math.MaxUint64 {
-			a.lastWorkerID = 0
+			return
 		}
 	}
 }
 
-// replenishWorkers tries to create Workers until limitation
-// has reached
-func (a *server) replenishWorkers(minWorkers uint32) uint32 {
-	remainerWorkers := a.cfg.MaxWorkers - a.workerStarted
+// serve listens the accepter and send accepted connection to acceptor
+func (s *server) serve(acc network.Acceptor) error {
+	log := s.logger.Context("Serving")
 
-	if remainerWorkers <= 0 {
-		return 0
+	defer func() {
+		log.Debugf("Closed")
+
+		s.downWait.Done()
+	}()
+
+	for {
+		cli, accErr := acc.Accept()
+
+		if accErr != nil {
+			select {
+			case <-acc.Closed():
+				return accErr
+
+			default:
+				log.Warningf("Failed to accept incomming connection "+
+					"due to error: %s", accErr)
+
+				time.Sleep(s.cfg.AcceptErrorWait)
+
+				continue
+			}
+		}
+
+		select {
+		case <-s.downNotify:
+			s.downNotify <- struct{}{}
+
+		case s.accept <- cli:
+		}
 	}
-
-	idleWorkers := a.workerStarted - a.workerOccupied
-
-	if idleWorkers >= minWorkers {
-		return 0
-	}
-
-	neededIdleWorkers := minWorkers
-
-	if neededIdleWorkers > remainerWorkers {
-		neededIdleWorkers = remainerWorkers
-	}
-
-	a.startWorkers(neededIdleWorkers)
-
-	return neededIdleWorkers
 }
 
 // Serve starts serving
-func (a *server) Serve() (Serving, error) {
-	a.servingLock.Lock()
-	defer a.servingLock.Unlock()
+func (s *server) Serve() (network.Serving, error) {
+	s.downLock.Lock()
+	defer s.downLock.Unlock()
 
-	if a.serving {
+	if s.serving {
 		return nil, ErrAlreadyServing
 	}
 
-	// Clear the old acceptorCloser signal
-	<-a.acceptorCloser
-
-	minWorkers := a.cfg.MinWorkers
-
-	if minWorkers <= 0 {
-		minWorkers = 1
-	}
-
-	// First, start listening
-	listen, listenErr := a.listener.Listen()
+	acc, listenErr := s.listener.Listen()
 
 	if listenErr != nil {
 		return nil, listenErr
 	}
 
-	// Then, bring up worker producer
-	a.workerProducerCloseWaiter.Add(1)
+	s.downWait.Add(2)
 
-	go a.producer(minWorkers)
+	go s.acceptor()
+	go s.serve(acc)
 
-	// After that, bring up MinWorkers numbers of workers
-	a.startWorkers(minWorkers)
-	a.workerStarted += minWorkers
-
-	// Then, start acceptor
-	acceptors := uint32(1)
-
-	if a.cfg.AcceptorPerWorkers > 0 {
-		acceptors = a.cfg.MaxWorkers / a.cfg.AcceptorPerWorkers
-
-		if acceptors <= 0 {
-			acceptors = 1
-		}
-	}
-
-	killChans := make([]chan kill, acceptors)
-
-	for killChanIndx := range killChans {
-		a.acceptorCloseWaiter.Add(1)
-
-		killChans[killChanIndx] = make(chan kill, 1)
-
-		go a.acceptor(uint64(killChanIndx), killChans[killChanIndx])
-	}
-
-	// Last, start server
-	a.serverCloseWaiter.Add(1)
-
-	go a.serve(listen)
-
-	// Mark us as started
-	a.serving = true
+	s.serving = true
 
 	return serving{
-		Server:   a,
-		Accepter: listen,
-		Kills:    killChans,
+		accepter: acc,
+		server:   s,
 	}, nil
 }
 
-// Listening returns listening port of current server
-func (a serving) Listening() net.Addr {
-	return a.Accepter.Addr()
+// Listening returns local address that current server is listening to
+func (s serving) Listening() net.Addr {
+	return s.accepter.Addr()
 }
 
-// Close shuts down the server
-func (a serving) Close() error {
-	a.Server.servingLock.Lock()
-	defer a.Server.servingLock.Unlock()
+// Close shutdown current server
+func (s serving) Close() error {
+	s.server.downLock.Lock()
+	defer s.server.downLock.Unlock()
 
-	if !a.Server.serving {
-		return ErrAlreadyClosed
+	if !s.server.serving {
+		return ErrNotServing
 	}
 
-	// First, shutdown the server so we don't accept connection
-	// any more
-	a.Server.serverCloser <- struct{}{}
+	s.server.downNotify <- struct{}{}
 
-	closeErr := a.Accepter.Close()
+	cErr := s.accepter.Close()
 
-	if closeErr != nil {
-		return closeErr
+	if cErr != nil {
+		return cErr
 	}
 
-	a.Server.serverCloseWaiter.Wait()
-	<-a.Server.serverCloser
+	s.server.downWait.Wait()
 
-	// Producer require two shutdown signal to shutdown, first one
-	// is notification for initialize it's shutdown progress so it will
-	// stop trying to produce new workers when it detects the total worker
-	// count became smaller than MinWorkers
-	a.Server.workerProducerCloser <- struct{}{}
-
-	// Send signal to kill exisiting connections, so the
-	// worker will be released free to pick up shutdown signal
-	fResults := make([]kill, len(a.Kills))
-
-	for f := range a.Kills {
-		fResults[f] = kill{
-			Done: make(chan struct{}),
-		}
-
-		a.Kills[f] <- fResults[f]
-	}
-
-	for f := range fResults {
-		<-fResults[f].Done
-	}
-
-	// First, shutdown workers
-	a.Server.workerCloser <- struct{}{}
-	a.Server.workerCloseWaiter.Wait()
-	<-a.Server.workerCloser
-
-	// Shutdown worker producer after all worker is down
-	a.Server.workerProducerCloser <- struct{}{}
-	a.Server.workerProducerCloseWaiter.Wait()
-
-	// Then, shutdown acceptor
-	a.Server.acceptorCloser <- struct{}{}
-	a.Server.acceptorCloseWaiter.Wait()
-	// Notice we don't clear acceptorCloser signal here. We did it
-	// when initialize Serving so we can use that signal in `accept`
-	// function even when the server is down
-
-	a.Server.serving = false
-
-	a.Server.logger.Debugf("Closed")
+	s.server.serving = false
+	<-s.server.downNotify
 
 	return nil
 }

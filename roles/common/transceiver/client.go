@@ -21,8 +21,6 @@
 package transceiver
 
 import (
-	"net"
-
 	"github.com/reinit/coward/common/fsm"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
@@ -52,8 +50,9 @@ type Balancer interface {
 type Requester interface {
 	ID() ClientID
 	Available() bool
+	Full() bool
 	Request(
-		requester net.Addr,
+		log logger.Logger,
 		req RequestBuilder,
 		cancel <-chan struct{},
 		m Meter) (bool, error)
@@ -67,7 +66,7 @@ type Balanced interface {
 	Clients(r func(ClientID, Requester))
 	Size() int
 	Request(
-		requester net.Addr,
+		log logger.Logger,
 		destName Destination,
 		req BalancedRequestBuilder,
 		cancel <-chan struct{}) error

@@ -18,14 +18,13 @@
 //  along with Crypto-Obscured Forwarder. If not, see
 //  <http://www.gnu.org/licenses/>.
 
-package corunner
+package projection
 
 import "time"
 
-// Config coroutiner's Configuration
+// Config Projection configuration
 type Config struct {
-	MaxWorkers        uint32
-	MinWorkers        uint32
-	MaxWorkerIdle     time.Duration
-	JobReceiveTimeout time.Duration
+	MaxReceivers   uint32
+	RequestTimeout time.Duration
+	Projects       []ID
 }

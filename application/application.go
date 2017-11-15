@@ -208,11 +208,28 @@ func (c *application) Help() error {
 
 	printer.Writeln([]byte("Execute options are:\r\n"), 1, 1, 1)
 
-	printer.Writeln([]byte(helpUsageSlient), 4, 15, 1)
-	printer.Writeln([]byte(helpUsageDebug), 4, 15, 1)
-	printer.Writeln([]byte(helpUsageDaemon), 4, 15, 1)
-	printer.Writeln([]byte(helpUsageLog), 4, 15, 1)
-	printer.Writeln([]byte(helpUsageParam), 4, 15, 1)
+	helpItemSpaceLen := c.roles.MaxRoleNameLen() - 3
+
+	if helpItemSpaceLen < 2 {
+		helpItemSpaceLen = 2
+	}
+
+	printer.Writeln([]byte(fmt.Sprintf(
+		helpUsageSlient,
+		strings.Repeat(" ", helpItemSpaceLen))), 4, helpItemSpaceLen+11, 1)
+	printer.Writeln([]byte(fmt.Sprintf(
+		helpUsageDebug,
+		strings.Repeat(" ", helpItemSpaceLen))), 4, helpItemSpaceLen+11, 1)
+	printer.Writeln([]byte(fmt.Sprintf(
+		helpUsageDaemon,
+		strings.Repeat(" ", helpItemSpaceLen))), 4, helpItemSpaceLen+11, 1)
+	printer.Writeln([]byte(fmt.Sprintf(
+		helpUsageLog,
+		strings.Repeat(" ", helpItemSpaceLen))), 4, helpItemSpaceLen+11, 1)
+	printer.Writeln([]byte(fmt.Sprintf(
+		helpUsageParam,
+		strings.Repeat(" ", helpItemSpaceLen))), 4, helpItemSpaceLen+11, 1)
+
 	printer.Write([]byte("\r\n\r\n"))
 
 	c.roles.List(printer)
@@ -599,6 +616,8 @@ func (c *application) execute(
 
 		if spawnErr != nil {
 			r.Unspawn()
+
+			<-closedNotify
 
 			return spawnErr
 		}

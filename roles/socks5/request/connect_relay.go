@@ -26,6 +26,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/relay"
 	"github.com/reinit/coward/roles/proxy/request"
@@ -44,7 +45,7 @@ type connectRelay struct {
 	requestTimeout time.Duration
 }
 
-func (c connectRelay) Initialize(server relay.Server) error {
+func (c connectRelay) Initialize(l logger.Logger, server relay.Server) error {
 	var wErr error
 
 	// Initialize the Channel to Connect command
@@ -58,11 +59,20 @@ func (c connectRelay) Initialize(server relay.Server) error {
 
 	portTimeoutBytes[0] = byte(c.addr.Port >> 8)
 	portTimeoutBytes[1] = byte((c.addr.Port << 8) >> 8)
-	portTimeoutBytes[2] = byte((c.requestTimeout / 2).Seconds())
+
+	reqTimeout := (c.requestTimeout / 2).Seconds()
+
+	if reqTimeout > math.MaxUint8 {
+		reqTimeout = math.MaxUint8
+	} else if reqTimeout < 1 {
+		reqTimeout = 1
+	}
+
+	portTimeoutBytes[2] = byte(reqTimeout)
 
 	switch c.addr.AType {
 	case common.ATypeIPv4:
-		_, wErr = server.Write([]byte{
+		_, wErr = rw.WriteFull(server, []byte{
 			request.TCPCommandIPv4,
 			c.addr.Address[0], c.addr.Address[1],
 			c.addr.Address[2], c.addr.Address[3],
@@ -70,7 +80,7 @@ func (c connectRelay) Initialize(server relay.Server) error {
 		})
 
 	case common.ATypeIPv6:
-		_, wErr = server.Write([]byte{
+		_, wErr = rw.WriteFull(server, []byte{
 			request.TCPCommandIPv6,
 			c.addr.Address[0], c.addr.Address[1],
 			c.addr.Address[2], c.addr.Address[3],
@@ -100,7 +110,7 @@ func (c connectRelay) Initialize(server relay.Server) error {
 		hostData[addrLen+3] = portTimeoutBytes[1]
 		hostData[addrLen+4] = portTimeoutBytes[2]
 
-		_, wErr = server.Write(hostData)
+		_, wErr = rw.WriteFull(server, hostData)
 
 	default:
 		return ErrConnectInvalidAddressType
@@ -143,6 +153,9 @@ func (c connectRelay) Initialize(server relay.Server) error {
 	case request.TCPRespondUnreachable:
 		connectError = ErrConnectInitialRespondTargetUnreachable
 
+	case request.TCPRespondBadRequest:
+		return ErrConnectInitialFailedBadRequest
+
 	case byte(relay.SignalError):
 		return ErrConnectInitialRelayFailed
 
@@ -156,7 +169,8 @@ func (c connectRelay) Initialize(server relay.Server) error {
 	return connectError
 }
 
-func (c connectRelay) Client(server relay.Server) (io.ReadWriteCloser, error) {
+func (c connectRelay) Client(
+	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
 	// Tell client that we're ready
 	//
 	// +----+-----+-------+------+----------+----------+
@@ -165,8 +179,12 @@ func (c connectRelay) Client(server relay.Server) (io.ReadWriteCloser, error) {
 	// | 1  |  1  | X'00' |  1   | Variable |    2     |
 	// +----+-----+-------+------+----------+----------+
 
-	rw.WriteFull(c.client, []byte{
+	_, wErr := rw.WriteFull(c.client, []byte{
 		0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+
+	if wErr != nil {
+		return nil, wErr
+	}
 
 	return c.client, nil
 }

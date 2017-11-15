@@ -24,7 +24,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/reinit/coward/common/corunner"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/fsm"
 	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/network"
@@ -85,7 +85,7 @@ const (
 type negotiator struct {
 	cfg                    Config
 	conn                   network.Connection
-	runner                 corunner.Runner
+	runner                 worker.Runner
 	shb                    *common.SharedBuffers
 	authenticator          Authenticator
 	selectedCMD            cmd
@@ -164,7 +164,7 @@ func (n *negotiator) Build() (
 ) {
 	switch n.selectedCMD {
 	case cmdConnect:
-		return transceiver.Destination(
+		return "Connect:" + transceiver.Destination(
 				n.selectedAddress.Address,
 			), request.Connect(
 				n.conn,
@@ -174,7 +174,7 @@ func (n *negotiator) Build() (
 				n.cfg.NegotiationTimeout), nil
 
 	case cmdUDP:
-		return transceiver.Destination(
+		return "UDP:" + transceiver.Destination(
 				n.selectedAddress.Address,
 			), request.UDP(
 				n.conn,

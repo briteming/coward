@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/roles/common/network/resolve"
 	"github.com/reinit/coward/roles/common/relay"
 )
@@ -35,7 +36,7 @@ type udpRelay struct {
 	listenIP  net.IP
 }
 
-func (u *udpRelay) Initialize(server relay.Server) error {
+func (u *udpRelay) Initialize(l logger.Logger, server relay.Server) error {
 	spLocalHost, _, spLocalErr := net.SplitHostPort(u.localAddr.String())
 
 	if spLocalErr != nil {
@@ -57,7 +58,8 @@ func (u *udpRelay) Initialize(server relay.Server) error {
 	return nil
 }
 
-func (u *udpRelay) Client(server relay.Server) (io.ReadWriteCloser, error) {
+func (u *udpRelay) Client(
+	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
 	listener, listenErr := net.ListenUDP("udp", &net.UDPAddr{
 		IP:   u.listenIP,
 		Port: 0,

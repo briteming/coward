@@ -23,7 +23,7 @@ package socks5
 import (
 	"time"
 
-	"github.com/reinit/coward/common/corunner"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/role"
 	"github.com/reinit/coward/roles/common/network"
@@ -38,18 +38,20 @@ import (
 type Authenticator func(username, password string) error
 
 type socks5 struct {
-	clients         transceiver.Balancer
-	listener        network.Listener
-	log             logger.Logger
-	cfg             Config
-	transceiver     transceiver.Balanced
-	serverServing   server.Serving
-	runner          corunner.Runner
-	unspawnNotifier role.UnspawnNotifier
+	clients                      transceiver.Balancer
+	listener                     network.Listener
+	log                          logger.Logger
+	cfg                          Config
+	transceiver                  transceiver.Balanced
+	transceiverReadTimeoutTicker *time.Ticker
+	serverServing                network.Serving
+	runner                       worker.Runner
+	unspawnNotifier              role.UnspawnNotifier
 }
 
 // New creates a new Socks5 server
 func New(
+	transceiverReadTimeoutTicker *time.Ticker,
 	cs []transceiver.Client,
 	listener network.Listener,
 	log logger.Logger,
@@ -89,9 +91,10 @@ func (s *socks5) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		vChannels += r.Channels()
 	})
 
-	runner, runnerServeErr := corunner.New(s.log, corunner.Config{
-		MaxWorkers:        vChannels,
-		MinWorkers:        pcommon.AutomaticalMinWorkerCount(vChannels, 128),
+	runner, runnerServeErr := worker.New(s.log, worker.Config{
+		MaxWorkers: vChannels + s.cfg.Capacity,
+		MinWorkers: pcommon.AutomaticalMinWorkerCount(
+			vChannels+s.cfg.Capacity, 128),
 		MaxWorkerIdle:     s.cfg.ConnectionTimeout * 10,
 		JobReceiveTimeout: s.cfg.NegotiationTimeout,
 	}).Serve()
@@ -125,13 +128,9 @@ func (s *socks5) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		negoTimeout:   s.cfg.NegotiationTimeout,
 		timeout:       s.cfg.ConnectionTimeout,
 		authenticator: s.cfg.Authenticator,
-	}, s.log, server.Config{
-		MaxWorkers: s.cfg.Capacity,
-		MinWorkers: pcommon.AutomaticalMinWorkerCount(
-			s.cfg.Capacity, 64),
-		MaxWorkerIdle:      s.cfg.ConnectionTimeout * 20,
-		AcceptErrorWait:    100 * time.Millisecond,
-		AcceptorPerWorkers: 1024,
+	}, s.log, s.runner, server.Config{
+		AcceptErrorWait: 100 * time.Millisecond,
+		MaxConnections:  s.cfg.Capacity,
 	}).Serve()
 
 	if serverServeErr != nil {
@@ -148,6 +147,8 @@ func (s *socks5) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 }
 
 func (s *socks5) Unspawn() error {
+	s.log.Infof("Closing")
+
 	if s.serverServing != nil {
 		serverCloseErr := s.serverServing.Close()
 
@@ -157,6 +158,8 @@ func (s *socks5) Unspawn() error {
 
 			return serverCloseErr
 		}
+
+		s.serverServing = nil
 	}
 
 	if s.transceiver != nil {
@@ -168,6 +171,13 @@ func (s *socks5) Unspawn() error {
 
 			return trsmCloseErr
 		}
+
+		s.transceiver = nil
+	}
+
+	if s.transceiverReadTimeoutTicker != nil {
+		s.transceiverReadTimeoutTicker.Stop()
+		s.transceiverReadTimeoutTicker = nil
 	}
 
 	if s.runner != nil {
@@ -179,11 +189,13 @@ func (s *socks5) Unspawn() error {
 
 			return runnerCloseErr
 		}
+
+		s.runner = nil
 	}
 
-	s.unspawnNotifier <- struct{}{}
+	s.log.Infof("Server is closed")
 
-	s.log.Infof("Server is down")
+	s.unspawnNotifier <- struct{}{}
 
 	return nil
 }

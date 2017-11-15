@@ -81,7 +81,7 @@ func (t listener) Listen() (network.Acceptor, error) {
 		buffer:            t.buffer,
 		connectionWrapper: t.connectionWrapper,
 		clients: clients{
-			clients: make(map[ipport]*conn, t.maxSize),
+			clients: make(map[network.ConnectionID]*conn, t.maxSize),
 			lock:    sync.Mutex{},
 			maxSize: t.maxSize,
 		},

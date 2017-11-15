@@ -21,10 +21,9 @@
 package clients
 
 import (
-	"net"
 	"sort"
-	"time"
 
+	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/timer"
 	"github.com/reinit/coward/roles/common/transceiver"
 )
@@ -37,8 +36,7 @@ type requester struct {
 }
 
 type requesters struct {
-	req        []*requester
-	lastUpdate time.Time
+	req []*requester
 }
 
 func (r *requester) Sink(s bool) {
@@ -54,12 +52,12 @@ func (r *requester) Delay() timer.Timer {
 }
 
 func (r *requester) Request(
-	reqer net.Addr,
+	log logger.Logger,
 	req transceiver.RequestBuilder,
 	cancel <-chan struct{},
 	m transceiver.Meter,
 ) (bool, error) {
-	return r.requester.Request(reqer, req, cancel, m)
+	return r.requester.Request(log, req, cancel, m)
 }
 
 func (r *requesters) Renew() {
@@ -68,12 +66,6 @@ func (r *requesters) Renew() {
 	}
 
 	sort.Sort(r)
-
-	r.lastUpdate = time.Now()
-}
-
-func (r *requesters) Updated() time.Time {
-	return r.lastUpdate
 }
 
 func (r *requesters) Outdated() bool {

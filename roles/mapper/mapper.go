@@ -26,7 +26,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/reinit/coward/common/corunner"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/role"
 	"github.com/reinit/coward/roles/common/network"
@@ -50,15 +50,20 @@ var (
 		"Unknow network protocol type")
 )
 
+const (
+	trReadTimeoutTickDelay = 300 * time.Millisecond
+)
+
 type mapper struct {
-	codec           transceiver.CodecBuilder
-	dialer          network.Dialer
-	log             logger.Logger
-	cfg             Config
-	transceiver     transceiver.Requester
-	servers         []server.Serving
-	runner          corunner.Runner
-	unspawnNotifier role.UnspawnNotifier
+	codec               transceiver.CodecBuilder
+	dialer              network.Dialer
+	log                 logger.Logger
+	cfg                 Config
+	transceiver         transceiver.Requester
+	trReadTimeoutTicker *time.Ticker
+	servers             []network.Serving
+	runner              worker.Runner
+	unspawnNotifier     role.UnspawnNotifier
 }
 
 // New creates a new Mapper
@@ -69,14 +74,15 @@ func New(
 	cfg Config,
 ) role.Role {
 	return &mapper{
-		codec:           codec,
-		dialer:          dialer,
-		log:             log.Context("Mapper"),
-		cfg:             cfg,
-		transceiver:     nil,
-		servers:         nil,
-		runner:          nil,
-		unspawnNotifier: nil,
+		codec:               codec,
+		dialer:              dialer,
+		log:                 log.Context("Mapper"),
+		cfg:                 cfg,
+		transceiver:         nil,
+		trReadTimeoutTicker: nil,
+		servers:             nil,
+		runner:              nil,
+		unspawnNotifier:     nil,
 	}
 }
 
@@ -87,9 +93,11 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		return ErrNoTargetForMapping
 	}
 
+	s.trReadTimeoutTicker = time.NewTicker(trReadTimeoutTickDelay)
+
 	// Open transceiver client first
 	trServe, trServeErr := tclient.New(
-		0, s.log, s.dialer, s.codec, tclient.Config{
+		0, s.log, s.dialer, s.codec, s.trReadTimeoutTicker.C, tclient.Config{
 			MaxConcurrent:        s.cfg.TransceiverMaxConnections,
 			RequestRetries:       s.cfg.TransceiverRequestRetries,
 			IdleTimeout:          s.cfg.TransceiverIdleTimeout,
@@ -107,10 +115,10 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 	s.transceiver = trServe
 
 	// Init runners
-	runner, runnerServeErr := corunner.New(s.log, corunner.Config{
-		MaxWorkers: trServe.Channels(),
+	runner, runnerServeErr := worker.New(s.log, worker.Config{
+		MaxWorkers: trServe.Channels() + s.cfg.Mapping.TotalCapacity(),
 		MinWorkers: pcommon.AutomaticalMinWorkerCount(
-			trServe.Channels(), 128),
+			trServe.Channels()+s.cfg.Mapping.TotalCapacity(), 128),
 		MaxWorkerIdle:     s.cfg.TransceiverIdleTimeout * 10,
 		JobReceiveTimeout: s.cfg.TransceiverInitialTimeout,
 	}).Serve()
@@ -126,11 +134,11 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		Buffer: make([]byte, 4096*trServe.Connections()),
 		Size:   4096}
 
-	s.servers = make([]server.Serving, len(s.cfg.Mapping))
+	s.servers = make([]network.Serving, len(s.cfg.Mapping))
 	startedServer := 0
 
 	for mIdx := range s.cfg.Mapping {
-		var serving server.Serving
+		var serving network.Serving
 		var serveErr error
 
 		switch s.cfg.Mapping[mIdx].Protocol {
@@ -152,13 +160,9 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 				net.JoinHostPort(s.cfg.Mapping[mIdx].Interface.String(),
 					strconv.FormatUint(
 						uint64(s.cfg.Mapping[mIdx].Port), 10))+")",
-			), server.Config{
-				MaxWorkers: s.cfg.Mapping[mIdx].Capicty,
-				MinWorkers: pcommon.AutomaticalMinWorkerCount(
-					s.cfg.Mapping[mIdx].Capicty, 64),
-				MaxWorkerIdle:      s.cfg.TransceiverIdleTimeout * 20,
-				AcceptErrorWait:    300 * time.Millisecond,
-				AcceptorPerWorkers: 1024,
+			), s.runner, server.Config{
+				AcceptErrorWait: 300 * time.Millisecond,
+				MaxConnections:  s.cfg.Mapping[mIdx].Capacity,
 			}).Serve()
 
 		case network.UDP:
@@ -166,7 +170,7 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 				s.cfg.Mapping[mIdx].Interface,
 				s.cfg.Mapping[mIdx].Port,
 				s.cfg.TransceiverIdleTimeout,
-				s.cfg.Mapping[mIdx].Capicty,
+				s.cfg.Mapping[mIdx].Capacity,
 				make([]byte, 4096),
 				udpconn.Wrap,
 			), udpHandler{
@@ -181,24 +185,12 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 				net.JoinHostPort(s.cfg.Mapping[mIdx].Interface.String(),
 					strconv.FormatUint(
 						uint64(s.cfg.Mapping[mIdx].Port), 10))+")",
-			), server.Config{
-				MaxWorkers: s.cfg.Mapping[mIdx].Capicty,
-				MinWorkers: pcommon.AutomaticalMinWorkerCount(
-					s.cfg.Mapping[mIdx].Capicty, 64),
-				MaxWorkerIdle:      s.cfg.TransceiverIdleTimeout * 20,
-				AcceptErrorWait:    300 * time.Millisecond,
-				AcceptorPerWorkers: 1024,
+			), s.runner, server.Config{
+				AcceptErrorWait: 300 * time.Millisecond,
+				MaxConnections:  s.cfg.Mapping[mIdx].Capacity,
 			}).Serve()
 
 		default:
-			for sIdx := range s.servers {
-				if s.servers[sIdx] == nil {
-					break
-				}
-
-				s.servers[sIdx].Close()
-			}
-
 			return ErrUnknownNetProtoType
 		}
 
@@ -209,7 +201,7 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 					strconv.FormatUint(uint64(
 						s.cfg.Mapping[mIdx].Port), 10)))
 
-			continue
+			return serveErr
 		}
 
 		s.servers[startedServer] = serving
@@ -228,6 +220,8 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 }
 
 func (s *mapper) Unspawn() error {
+	s.log.Infof("Closing")
+
 	// Close transceiver
 	if s.transceiver != nil {
 		transErr := s.transceiver.Close()
@@ -237,13 +231,19 @@ func (s *mapper) Unspawn() error {
 		}
 	}
 
+	if s.trReadTimeoutTicker == nil {
+		s.trReadTimeoutTicker.Stop()
+		s.trReadTimeoutTicker = nil
+	}
+
 	// Then, close all servers
 	for sIdx := range s.servers {
 		if s.servers[sIdx] == nil {
-			break
+			continue
 		}
 
 		s.servers[sIdx].Close()
+		s.servers[sIdx] = nil
 	}
 
 	// Close runner at last
@@ -255,9 +255,9 @@ func (s *mapper) Unspawn() error {
 		}
 	}
 
-	s.unspawnNotifier <- struct{}{}
+	s.log.Infof("Server is closed")
 
-	s.log.Infof("Server is down")
+	s.unspawnNotifier <- struct{}{}
 
 	return nil
 }

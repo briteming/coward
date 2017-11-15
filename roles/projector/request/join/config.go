@@ -18,19 +18,17 @@
 //  along with Crypto-Obscured Forwarder. If not, see
 //  <http://www.gnu.org/licenses/>.
 
-package server
+package join
 
 import (
-	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/timer"
 	"github.com/reinit/coward/roles/common/network"
 )
 
-// Handler is the network.Connection handler
-type Handler interface {
-	New(network.Connection, logger.Logger) (Client, error)
-}
-
-// Client represents a client connection
-type Client interface {
-	Serve() error
+// Config Join Configuration
+type Config struct {
+	ConnectionID    network.ConnectionID
+	ConnectionDelay timer.Timer
+	Buffer          []byte
+	Timeout         uint16
 }

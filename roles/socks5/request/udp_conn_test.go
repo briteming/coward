@@ -26,6 +26,7 @@ import (
 	"net"
 	"testing"
 
+	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/proxy/request"
 	"github.com/reinit/coward/roles/socks5/common"
 )
@@ -203,7 +204,7 @@ func testUDPConnWrite(
 ) (int, []byte, *net.UDPAddr, error) {
 	write := make(chan dummyUDPConnWrite, 1)
 
-	udpC := udpConn{
+	udpC := &udpConn{
 		UDPConn: dummyUDPConn{
 			Read:  nil,
 			Write: write,
@@ -216,7 +217,7 @@ func testUDPConnWrite(
 		},
 	}
 
-	wLen, wErr := udpC.Write(data)
+	wLen, wErr := rw.WriteFull(udpC, data)
 
 	wData := <-write
 

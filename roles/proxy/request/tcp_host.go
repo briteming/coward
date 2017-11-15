@@ -58,14 +58,15 @@ func (c TCPHost) ID() command.ID {
 func (c TCPHost) New(rw rw.ReadWriteDepleteDoner) fsm.Machine {
 	return &tcpHost{
 		tcp: tcp{
-			rw:                rw,
+			logger:            c.Logger,
 			buf:               c.Buffer,
 			dialTimeout:       c.DialTimeout,
 			connectionTimeout: c.ConnectionTimeout,
 			runner:            c.Runner,
-			relay:             nil,
 			cancel:            c.Cancel,
 			noLocalAccess:     c.NoLocalAccess,
+			rw:                rw,
+			relay:             nil,
 		},
 	}
 }
@@ -100,11 +101,17 @@ func (c *tcpHost) Bootup() (fsm.State, error) {
 
 	timeout := time.Duration(c.buf[rLen-1]) * time.Second
 
-	if timeout == 0 || timeout > c.dialTimeout {
+	if timeout <= 0 {
+		c.rw.Write([]byte{TCPRespondBadRequest})
+
+		return nil, ErrTCPInvalidTimeout
+	}
+
+	if timeout > c.dialTimeout {
 		timeout = c.dialTimeout
 	}
 
-	c.relay = relay.New(c.runner, c.rw, c.buf, tcpRelay{
+	c.relay = relay.New(c.logger, c.runner, c.rw, c.buf, tcpRelay{
 		noLocalAccess:     c.noLocalAccess,
 		dialTimeout:       c.dialTimeout,
 		connectionTimeout: c.connectionTimeout,

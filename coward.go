@@ -26,6 +26,8 @@ import (
 	"github.com/reinit/coward/application"
 	"github.com/reinit/coward/roles/common/codec"
 	"github.com/reinit/coward/roles/mapper"
+	"github.com/reinit/coward/roles/project"
+	"github.com/reinit/coward/roles/projector"
 	"github.com/reinit/coward/roles/proxy"
 	"github.com/reinit/coward/roles/socks5"
 )
@@ -41,6 +43,7 @@ func main() {
 		URL:       "",
 		Components: application.Components{
 			proxy.Role, socks5.Role, mapper.Role,
+			projector.Role, project.Role,
 			codec.Plain,
 			codec.AESCFB128, codec.AESCFB256,
 			codec.AESGCM128, codec.AESGCM256,

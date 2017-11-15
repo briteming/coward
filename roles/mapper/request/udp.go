@@ -21,8 +21,8 @@
 package request
 
 import (
-	"github.com/reinit/coward/common/corunner"
 	"github.com/reinit/coward/common/fsm"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/network"
@@ -43,7 +43,7 @@ type udp struct {
 func UDP(
 	mapper proxycommon.MapID,
 	client network.Connection,
-	runner corunner.Runner,
+	runner worker.Runner,
 	shb *common.SharedBuffer,
 ) transceiver.RequestBuilder {
 	return func(
@@ -53,7 +53,7 @@ func UDP(
 	) fsm.Machine {
 		return tcp{
 			log: log,
-			relay: relay.New(runner, conn, shb.Select(id), udpRelay{
+			relay: relay.New(log, runner, conn, shb.Select(id), udpRelay{
 				mapper: mapper,
 				client: client,
 			}, make([]byte, 4096)),

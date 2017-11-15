@@ -22,7 +22,6 @@ package clients
 
 import (
 	"errors"
-	"net"
 	"sync"
 	"sync/atomic"
 
@@ -64,9 +63,8 @@ func (d *destinations) getDest(
 	bumped, expireID := d.expire.Add(name)
 
 	de = &destination{
-		Priorities:           make(priorities, requesters.Len()),
-		ExpirerIndex:         expireID,
-		LastPrioritiesUpdate: requesters.Updated(),
+		Priorities:   make(priorities, requesters.Len()),
+		ExpirerIndex: expireID,
 	}
 
 	requesters.All(func(idx int, req *requester) {
@@ -84,7 +82,7 @@ func (d *destinations) getDest(
 }
 
 func (d *destinations) Request(
-	reqer net.Addr,
+	log logger.Logger,
 	dest transceiver.Destination,
 	req transceiver.BalancedRequestBuilder,
 	cancel <-chan struct{},
@@ -103,6 +101,11 @@ func (d *destinations) Request(
 	lock.Unlock()
 
 	continueLoop := true
+	serverTried := make([]bool, len(destPriorities))
+
+	for stIdx := range serverTried {
+		serverTried[stIdx] = false
+	}
 
 	atomic.AddUint32(&dests.RunningRequests, 1)
 	defer atomic.AddUint32(&dests.RunningRequests, ^uint32(0))
@@ -110,12 +113,15 @@ func (d *destinations) Request(
 	// Try all Clients one by one
 	for {
 		for dIdx := range destPriorities {
-			if continueLoop &&
-				!destPriorities[dIdx].requester.requester.Available() {
+			if serverTried[dIdx] {
 				continue
 			}
 
-			continueLoop = false
+			if continueLoop &&
+				!destPriorities[dIdx].requester.requester.Available() &&
+				destPriorities[dIdx].requester.requester.Full() {
+				continue
+			}
 
 			m := &meter{
 				current:     destPriorities[dIdx],
@@ -124,8 +130,10 @@ func (d *destinations) Request(
 				lock:        lock,
 			}
 
+			serverTried[dIdx] = true
+
 			retriable, reqErr = destPriorities[dIdx].requester.Request(
-				reqer, func(
+				log, func(
 					connectionID transceiver.ConnectionID,
 					server rw.ReadWriteDepleteDoner,
 					log logger.Logger,

@@ -36,6 +36,7 @@ const (
 type connection struct {
 	net.Conn
 
+	id                   network.ConnectionID
 	readTimeout          time.Duration
 	readTimeoutSet       bool
 	readTimeoutDisabled  bool
@@ -43,13 +44,16 @@ type connection struct {
 	writeTimeoutSet      bool
 	writeTimeoutDisabled bool
 	close                chan struct{}
+	closed               bool
 	closeLock            sync.Mutex
 }
 
 // Wrap wraps a net.Conn to a network.Connection
 func Wrap(conn net.Conn) network.Connection {
 	return &connection{
-		Conn:                 conn,
+		Conn: conn,
+		id: network.ConnectionID(
+			conn.LocalAddr().String() + "-" + conn.RemoteAddr().String()),
 		readTimeout:          zeroTimeDuration,
 		readTimeoutSet:       false,
 		readTimeoutDisabled:  false,
@@ -57,6 +61,7 @@ func Wrap(conn net.Conn) network.Connection {
 		writeTimeoutSet:      false,
 		writeTimeoutDisabled: false,
 		close:                make(chan struct{}, 1),
+		closed:               false,
 		closeLock:            sync.Mutex{},
 	}
 }
@@ -64,23 +69,28 @@ func Wrap(conn net.Conn) network.Connection {
 func (c *connection) filterErr(err error) error {
 	switch err {
 	case io.EOF:
-		c.setDropped()
+		c.drop()
 	}
 
 	return err
 }
 
-func (c *connection) setDropped() {
+func (c *connection) drop() error {
 	c.closeLock.Lock()
 	defer c.closeLock.Unlock()
 
-	select {
-	case <-c.close:
-		return
-
-	default:
-		close(c.close)
+	if c.closed {
+		return io.EOF
 	}
+
+	close(c.close)
+	c.closed = true
+
+	return c.Conn.Close()
+}
+
+func (c *connection) ID() network.ConnectionID {
+	return c.id
 }
 
 func (c *connection) SetTimeout(t time.Duration) {
@@ -205,9 +215,7 @@ func (c *connection) Write(b []byte) (int, error) {
 }
 
 func (c *connection) Close() error {
-	c.setDropped()
-
-	return c.Conn.Close()
+	return c.drop()
 }
 
 func (c *connection) Closed() <-chan struct{} {

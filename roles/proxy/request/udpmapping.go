@@ -26,8 +26,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/reinit/coward/common/corunner"
 	"github.com/reinit/coward/common/fsm"
+	"github.com/reinit/coward/common/worker"
+	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/command"
 	"github.com/reinit/coward/roles/common/network"
@@ -43,7 +44,8 @@ var (
 
 // UDPMapping UDP Mapping request
 type UDPMapping struct {
-	Runner      corunner.Runner
+	Logger      logger.Logger
+	Runner      worker.Runner
 	Buffer      []byte
 	Cancel      <-chan struct{}
 	LocalAddr   net.Addr
@@ -52,14 +54,15 @@ type UDPMapping struct {
 }
 
 type udpMapping struct {
+	logger      logger.Logger
 	mapping     common.Mapping
 	buf         []byte
 	localAddr   net.Addr
 	dialTimeout time.Duration
-	rw          rw.ReadWriteDepleteDoner
-	runner      corunner.Runner
-	relay       relay.Relay
+	runner      worker.Runner
 	cancel      <-chan struct{}
+	rw          rw.ReadWriteDepleteDoner
+	relay       relay.Relay
 }
 
 // ID returns current Request ID
@@ -70,14 +73,15 @@ func (c UDPMapping) ID() command.ID {
 // New creates a new request context
 func (c UDPMapping) New(rw rw.ReadWriteDepleteDoner) fsm.Machine {
 	return &udpMapping{
+		logger:      c.Logger,
 		mapping:     c.Mapping,
 		buf:         c.Buffer,
 		localAddr:   c.LocalAddr,
 		dialTimeout: c.DialTimeout,
-		rw:          rw,
 		runner:      c.Runner,
-		relay:       nil,
 		cancel:      c.Cancel,
+		rw:          rw,
+		relay:       nil,
 	}
 }
 
@@ -106,7 +110,7 @@ func (u *udpMapping) Bootup() (fsm.State, error) {
 		return nil, ErrUDPMappingNotFound
 	}
 
-	u.relay = relay.New(u.runner, u.rw, u.buf, &udpMappingRelay{
+	u.relay = relay.New(u.logger, u.runner, u.rw, u.buf, &udpMappingRelay{
 		localAddr:      u.localAddr,
 		resolveTimeout: u.dialTimeout,
 		mapped:         mapped,

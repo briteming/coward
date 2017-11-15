@@ -24,8 +24,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/reinit/coward/common/corunner"
 	"github.com/reinit/coward/common/fsm"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/network"
@@ -54,6 +54,9 @@ var (
 	ErrConnectInitialRespondTargetUnreachable = errors.New(
 		"Remote has failed to connect to the specified host")
 
+	ErrConnectInitialFailedBadRequest = errors.New(
+		"Remote has failed to initialize due to an invalid request")
+
 	ErrConnectInvalidExchangeRespond = errors.New(
 		"Invalid exchange respond")
 )
@@ -68,7 +71,7 @@ type connect struct {
 func Connect(
 	client network.Connection,
 	addr common.Address,
-	runner corunner.Runner,
+	runner worker.Runner,
 	shb *common.SharedBuffers,
 	requestTimeout time.Duration,
 ) transceiver.BalancedRequestBuilder {
@@ -81,7 +84,7 @@ func Connect(
 		return connect{
 			log: log,
 			relay: relay.New(
-				runner, conn, shb.For(cID).Select(id), connectRelay{
+				log, runner, conn, shb.For(cID).Select(id), connectRelay{
 					client:         client,
 					addr:           addr,
 					requestTimeout: requestTimeout,

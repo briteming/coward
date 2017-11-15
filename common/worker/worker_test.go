@@ -18,7 +18,7 @@
 //  along with Crypto-Obscured Forwarder. If not, see
 //  <http://www.gnu.org/licenses/>.
 
-package corunner
+package worker
 
 import (
 	"testing"
@@ -27,7 +27,7 @@ import (
 	"github.com/reinit/coward/common/logger"
 )
 
-func TestCoroutinerServeClose(t *testing.T) {
+func TestJobServeClose(t *testing.T) {
 	c := New(logger.NewDitch(), Config{
 		MaxWorkers:        64,
 		MinWorkers:        16,
@@ -70,7 +70,7 @@ func TestCoroutinerServeClose(t *testing.T) {
 	}
 }
 
-func TestCoroutinerServeRunWaitClose(t *testing.T) {
+func TestJobServeRunWaitClose(t *testing.T) {
 	c := New(logger.NewDitch(), Config{
 		MaxWorkers:        64,
 		MinWorkers:        16,
@@ -89,11 +89,12 @@ func TestCoroutinerServeRunWaitClose(t *testing.T) {
 	doneWait := make(chan struct{})
 	closeWait := make(chan struct{})
 	results := [65]error{}
+	log := logger.NewDitch()
 
 	go func() {
 		for i := 0; i < 65; i++ {
 			go func(ind int) {
-				results[ind] = serving.RunWait(func() error {
+				results[ind] = serving.RunWait(log, func(logger.Logger) error {
 					<-doneWait
 
 					return nil

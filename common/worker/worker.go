@@ -18,7 +18,7 @@
 //  along with Crypto-Obscured Forwarder. If not, see
 //  <http://www.gnu.org/licenses/>.
 
-package corunner
+package worker
 
 import (
 	"errors"
@@ -53,29 +53,30 @@ const (
 	idleCheckTickDelay = 600 * time.Second
 )
 
-// Corunner is a Go routine manager
-type Corunner interface {
+// Workers is a Go routine manager
+type Workers interface {
 	Serve() (Runner, error)
 }
 
-// Runner is a serving Corunner
+// Runner is a serving Jobs
 type Runner interface {
-	Run(j Job, cancel <-chan struct{}) (chan error, error)
-	RunWait(j Job, cancel <-chan struct{}) error
+	Run(log logger.Logger, j Job, cancel <-chan struct{}) (chan error, error)
+	RunWait(log logger.Logger, j Job, cancel <-chan struct{}) error
 	Close() error
 }
 
 // Job to run
-type Job func() error
+type Job func(logger.Logger) error
 
 // job dispatch data
 type job struct {
+	Logger logger.Logger
 	Job    Job
 	Result chan error
 }
 
-// corunner implements Corunner
-type corunner struct {
+// workers implements Workers
+type workers struct {
 	log                   logger.Logger
 	cfg                   Config
 	booted                bool
@@ -94,10 +95,10 @@ type corunner struct {
 	shutdownWait          sync.WaitGroup
 }
 
-// New creates a new Corunner
-func New(log logger.Logger, cfg Config) Corunner {
-	return &corunner{
-		log:                   log.Context("Corunner"),
+// New creates a new Jobs
+func New(log logger.Logger, cfg Config) Workers {
+	return &workers{
+		log:                   log.Context("Workers"),
 		cfg:                   cfg,
 		booted:                false,
 		bootLock:              sync.Mutex{},
@@ -117,13 +118,13 @@ func New(log logger.Logger, cfg Config) Corunner {
 }
 
 // worker is a Job worker
-func (c *corunner) worker() {
+func (c *workers) worker(ready chan struct{}) {
 	workerID := <-c.workerID
 	workerID++
 	c.workerID <- workerID
 
-	log := c.log.Context(
-		"Worker (" + strconv.FormatUint(uint64(workerID), 10) + ")")
+	workerName := "Worker (" + strconv.FormatUint(uint64(workerID), 10) + ")"
+	log := c.log.Context(workerName)
 
 	atomic.AddUint32(&c.workerCount, 1)
 
@@ -141,8 +142,11 @@ func (c *corunner) worker() {
 
 	for {
 		select {
+		case ready <- struct{}{}:
+			ready = nil
+
 		case j := <-c.job:
-			j.Result <- j.Job()
+			j.Result <- j.Job(j.Logger.Context(workerName))
 
 		case d := <-c.shutdown:
 			c.shutdown <- d
@@ -221,7 +225,7 @@ func (c *corunner) worker() {
 }
 
 // createWorkers creates worker
-func (c *corunner) createWorkers(num uint32) {
+func (c *workers) createWorkers(num uint32) {
 	remainFreeWorkers := c.cfg.MaxWorkers - atomic.LoadUint32(&c.workerCount)
 
 	if remainFreeWorkers <= 0 {
@@ -238,15 +242,27 @@ func (c *corunner) createWorkers(num uint32) {
 		<-c.idleCheckChecking
 	}()
 
+	ready := make(chan struct{}, num)
+
 	for i := uint32(0); i < num; i++ {
 		c.shutdownWait.Add(1)
 
-		go c.worker()
+		go c.worker(ready)
 	}
+
+	for range ready {
+		num--
+
+		if num <= 0 {
+			break
+		}
+	}
+
+	close(ready)
 }
 
 // Serve start serve
-func (c *corunner) Serve() (Runner, error) {
+func (c *workers) Serve() (Runner, error) {
 	c.bootLock.Lock()
 	defer c.bootLock.Unlock()
 
@@ -267,7 +283,7 @@ func (c *corunner) Serve() (Runner, error) {
 }
 
 // Close stop serve
-func (c *corunner) Close() error {
+func (c *workers) Close() error {
 	c.bootLock.Lock()
 	defer c.bootLock.Unlock()
 
@@ -291,8 +307,13 @@ func (c *corunner) Close() error {
 
 // Run run a Job in a routine, and return a error channel to receive it's
 // running result
-func (c *corunner) Run(j Job, cancel <-chan struct{}) (chan error, error) {
+func (c *workers) Run(
+	l logger.Logger,
+	j Job,
+	cancel <-chan struct{},
+) (chan error, error) {
 	newJob := job{
+		Logger: l,
 		Job:    j,
 		Result: make(chan error, 1),
 	}
@@ -302,6 +323,9 @@ func (c *corunner) Run(j Job, cancel <-chan struct{}) (chan error, error) {
 		return newJob.Result, nil
 
 	default:
+		c.bootLock.Lock()
+		defer c.bootLock.Unlock()
+
 		c.createWorkers(c.cfg.MinWorkers)
 	}
 
@@ -331,8 +355,12 @@ func (c *corunner) Run(j Job, cancel <-chan struct{}) (chan error, error) {
 }
 
 // RunWait run a Job in a routine, and wait for it to complete
-func (c *corunner) RunWait(j Job, cancel <-chan struct{}) error {
-	runResult, runErr := c.Run(j, cancel)
+func (c *workers) RunWait(
+	l logger.Logger,
+	j Job,
+	cancel <-chan struct{},
+) error {
+	runResult, runErr := c.Run(l, j, cancel)
 
 	if runErr != nil {
 		return runErr

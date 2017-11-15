@@ -22,10 +22,9 @@ package clients
 
 import (
 	"errors"
-	"net"
 	"sync"
-	"time"
 
+	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/timer"
 	"github.com/reinit/coward/roles/common/transceiver"
 )
@@ -52,8 +51,7 @@ func New(clis []transceiver.Client, maxDestinations int) transceiver.Balancer {
 	return &clients{
 		clients: clis,
 		requesters: requesters{
-			req:        make([]*requester, len(clis)),
-			lastUpdate: time.Time{},
+			req: make([]*requester, len(clis)),
 		},
 		destinations: destinations{
 			dest: make(
@@ -117,19 +115,33 @@ func (c *clients) Close() error {
 	// Close all requesters
 	var closeErr error
 
+	closeWait := sync.WaitGroup{}
+	closeErrLock := sync.Mutex{}
+
 	for rCloseIdx := range c.requesters.req {
 		if c.requesters.req[rCloseIdx].requester == nil {
 			continue
 		}
 
-		cErr := c.requesters.req[rCloseIdx].requester.Close()
+		closeWait.Add(1)
 
-		if cErr == nil {
-			continue
-		}
+		go func(req transceiver.Requester) {
+			defer closeWait.Done()
 
-		closeErr = cErr
+			cErr := req.Close()
+
+			if cErr == nil {
+				return
+			}
+
+			closeErrLock.Lock()
+			defer closeErrLock.Unlock()
+
+			closeErr = cErr
+		}(c.requesters.req[rCloseIdx].requester)
 	}
+
+	closeWait.Wait()
 
 	// Mark shutdown
 	c.booted = false
@@ -148,11 +160,11 @@ func (c *clients) Clients(r func(transceiver.ClientID, transceiver.Requester)) {
 }
 
 func (c *clients) Request(
-	reqer net.Addr,
+	log logger.Logger,
 	dest transceiver.Destination,
 	req transceiver.BalancedRequestBuilder,
 	cancel <-chan struct{},
 ) error {
 	return c.destinations.Request(
-		reqer, dest, req, cancel, &c.requesters, &c.bootLock)
+		log, dest, req, cancel, &c.requesters, &c.bootLock)
 }

@@ -100,7 +100,11 @@ func (d *dummyConnection) Read(b []byte) (int, error) {
 
 func (d *dummyConnection) Close() error {
 	select {
-	case <-d.reading:
+	case _, ok := <-d.reading:
+		if ok {
+			close(d.reading)
+		}
+
 		return io.EOF
 
 	default:
@@ -121,7 +125,9 @@ func TestClientUpDown(t *testing.T) {
 			return make(chan dummyConnReading, 1)
 		},
 	}
-	c := New(0, log, dialer, testDummyEncodec, Config{
+	requestWaitTicker := time.NewTicker(300 * time.Second)
+	defer requestWaitTicker.Stop()
+	c := New(0, log, dialer, testDummyEncodec, requestWaitTicker.C, Config{
 		MaxConcurrent:        100,
 		RequestRetries:       10,
 		InitialTimeout:       1 * time.Second,
@@ -243,7 +249,9 @@ func TestClientUpRequestThenDown(t *testing.T) {
 			return make(chan dummyConnReading, 1)
 		},
 	}
-	c := New(0, log, dialer, testDummyEncodec, Config{
+	requestWaitTicker := time.NewTicker(300 * time.Second)
+	defer requestWaitTicker.Stop()
+	c := New(0, log, dialer, testDummyEncodec, requestWaitTicker.C, Config{
 		MaxConcurrent:        16,
 		RequestRetries:       10,
 		InitialTimeout:       1 * time.Second,
@@ -261,17 +269,11 @@ func TestClientUpRequestThenDown(t *testing.T) {
 	}
 
 	for i := 0; i < 30; i++ {
-		go serving.Request(dummyAddr{
-			network: "",
-			address: "TEST",
-		}, dummyRequestBuilder(
+		go serving.Request(log, dummyRequestBuilder(
 			true,
 		), nil, dummyMeter{})
 
-		go serving.Request(dummyAddr{
-			network: "",
-			address: "TEST",
-		}, dummyRequestBuilder(
+		go serving.Request(log, dummyRequestBuilder(
 			false,
 		), nil, dummyMeter{})
 	}
@@ -285,19 +287,6 @@ func TestClientUpRequestThenDown(t *testing.T) {
 	}
 }
 
-type dummyAddr struct {
-	network string
-	address string
-}
-
-func (d dummyAddr) Network() string {
-	return d.network
-}
-
-func (d dummyAddr) String() string {
-	return d.address
-}
-
 func BenchmarkClientRequest(b *testing.B) {
 	log := logger.NewDitch()
 	dialer := &dummyDialer{
@@ -305,7 +294,9 @@ func BenchmarkClientRequest(b *testing.B) {
 			return make(chan dummyConnReading, 1)
 		},
 	}
-	c := New(0, log, dialer, testDummyEncodec, Config{
+	requestWaitTicker := time.NewTicker(300 * time.Second)
+	defer requestWaitTicker.Stop()
+	c := New(0, log, dialer, testDummyEncodec, requestWaitTicker.C, Config{
 		MaxConcurrent:        16,
 		RequestRetries:       10,
 		InitialTimeout:       10 * time.Second,
@@ -328,10 +319,7 @@ func BenchmarkClientRequest(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, reqErr := serving.Request(dummyAddr{
-			network: "",
-			address: "TEST",
-		}, dummyRequestBuilder(
+		_, reqErr := serving.Request(log, dummyRequestBuilder(
 			false,
 		), nil, dummyMeter{})
 

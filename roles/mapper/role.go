@@ -45,7 +45,7 @@ type ConfigMapping struct {
 	Protocol          string `json:"protocol" cfg:"o,-protocol:Protocol type of the remote destination.\r\n\r\nMust matchs the setting defined on the COWARD Proxy."`
 	Interface         string `json:"interface" cfg:"a,-interface:Specify a local network interface to serve for the mapped destination."`
 	Port              uint16 `json:"port" cfg:"p,-port:Specify a local port to serve for the mapped destination."`
-	Capicty           uint32 `json:"capicty" cfg:"c,-capacity:The maximum connections this Mapping server can accept.\r\n\r\nWhen amount of connections reached this limitation, new incoming connection will be dropped."`
+	Capacity          uint32 `json:"capacity" cfg:"c,-capacity:The maximum connections this Mapping server can accept.\r\n\r\nWhen amount of connections reached this limitation, new incoming connection will be dropped."`
 }
 
 // VerifyProtocol Verify Protocol
@@ -72,10 +72,10 @@ func (c *ConfigMapping) VerifyInterface() error {
 	return nil
 }
 
-// VerifyCapicty Verify Capicty
-func (c *ConfigMapping) VerifyCapicty() error {
-	if c.Capicty < 1 {
-		return errors.New("Capicty must be greater than 0")
+// VerifyCapacity Verify Capacity
+func (c *ConfigMapping) VerifyCapacity() error {
+	if c.Capacity < 1 {
+		return errors.New("Capacity must be greater than 0")
 	}
 
 	return nil
@@ -95,8 +95,8 @@ func (c *ConfigMapping) Verify() error {
 		return errors.New("Port must be specified")
 	}
 
-	if c.Capicty <= 0 {
-		return errors.New("Capicty must be specified")
+	if c.Capacity <= 0 {
+		return errors.New("Capacity must be specified")
 	}
 
 	return nil
@@ -115,7 +115,7 @@ type ConfigInput struct {
 	Timeout        uint16          `json:"timeout" cfg:"t,-timeout:The maximum idle time in second of a established proxy connection.\r\n\r\nIf the proxy connection consecutively idle during this period of time, then that connection will be considered as inactive and thus be disconnected.\r\n\r\nIt is recommended to set this value no greater than the related one on the COWARD Proxy server setting."`
 	RequestTimeout uint16          `json:"request_timeout" cfg:"rt,-request-timeout:The maximum wait time in second for the server to respond the Initial request of a client.\r\n\r\nIf the COWARD Proxy server has failed to respond the Initial request within this period of time, the connection will be considered broken and thus be closed.\r\n\r\nIt is recommended to set this value slightly greater than the \"--initial-timeout\" setting on the COWARD Proxy server."`
 	Mapping        []ConfigMapping `json:"mapping" cfg:"m,-mapping:Enable and configure mapped remote destinations.\r\n\r\nThis will allow you to map the pre-defined destinations on the Proxy as local servers.\r\n\r\nAll access to these servers will be relayed to their corresponding remote destinations transparently through the COWARD Proxy server."`
-	Codec          string          `json:"codec" cfg:"e,-codec:Specifiy which Codec will be used to decode and encode data payload from and to a connection."`
+	Codec          string          `json:"codec" cfg:"e,-codec:Specify which Codec will be used to encode and decode  data payload to and from a connection."`
 	CodecSetting   string          `json:"codec_setting" cfg:"es,-codec-cfg:Configuration of the Codec.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
 }
 
@@ -342,7 +342,7 @@ func Role() role.Registration {
 					Interface: cfg.Mapping[mIdx].selectedInterface,
 					Port:      cfg.Mapping[mIdx].Port,
 					Protocol:  cfg.Mapping[mIdx].selectProto,
-					Capicty:   cfg.Mapping[mIdx].Capicty,
+					Capacity:  cfg.Mapping[mIdx].Capacity,
 				}
 			}
 

@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/reinit/coward/common/corunner"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 )
 
@@ -131,12 +131,14 @@ type dummyClientBuilder1 struct {
 }
 
 func (d *dummyClientBuilder1) Initialize(
+	l logger.Logger,
 	server Server,
 ) error {
 	return nil
 }
 
 func (d *dummyClientBuilder1) Client(
+	l logger.Logger,
 	server Server,
 ) (io.ReadWriteCloser, error) {
 	return d.conn, nil
@@ -156,7 +158,7 @@ func (d *dummyCountedBufferWrite) Write(b []byte) (int, error) {
 }
 
 func TestRelayRelay(t *testing.T) {
-	runner, runnerErr := corunner.New(logger.NewDitch(), corunner.Config{
+	runner, runnerErr := worker.New(logger.NewDitch(), worker.Config{
 		MaxWorkers:        64,
 		MinWorkers:        64,
 		MaxWorkerIdle:     5 * time.Minute,
@@ -179,7 +181,7 @@ func TestRelayRelay(t *testing.T) {
 	relay1ClientReading := make(chan io.Reader)
 	relay1ClientSends := bytes.NewBuffer(make([]byte, 0, 4096))
 
-	relay1 := New(runner, &dummyServerConn{
+	relay1 := New(logger.NewDitch(), runner, &dummyServerConn{
 		r: relay1Reading,
 		w: relay1Sends,
 	}, clientBuffer1[:], &dummyClientBuilder1{
@@ -245,7 +247,7 @@ func TestRelayRelay(t *testing.T) {
 	relay2ClientReading := make(chan io.Reader)
 	relay2ClientSends := bytes.NewBuffer(make([]byte, 0, 4096))
 
-	relay2 := New(runner, &dummyServerConn{
+	relay2 := New(logger.NewDitch(), runner, &dummyServerConn{
 		r: relay2Reading,
 		w: relay2Sends,
 	}, clientBuffer2[:], &dummyClientBuilder1{

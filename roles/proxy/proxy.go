@@ -23,7 +23,7 @@ package proxy
 import (
 	"time"
 
-	"github.com/reinit/coward/common/corunner"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/role"
 	"github.com/reinit/coward/roles/common/network"
@@ -43,8 +43,8 @@ type proxy struct {
 	logger          logger.Logger
 	codec           transceiver.CodecBuilder
 	mapping         common.Mapping
-	serving         server.Serving
-	runner          corunner.Runner
+	serving         network.Serving
+	runner          worker.Runner
 	timeoutTicker   *time.Ticker
 	unspawnNotifier role.UnspawnNotifier
 }
@@ -84,11 +84,12 @@ func (s *proxy) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 	}
 
 	// Start Corunner
-	runner, runnerServeErr := corunner.New(s.logger, corunner.Config{
-		MaxWorkers: s.cfg.Capacity * uint32(
-			s.cfg.ConnectionChannels),
+	runner, runnerServeErr := worker.New(s.logger, worker.Config{
+		MaxWorkers: (s.cfg.Capacity * uint32(
+			s.cfg.ConnectionChannels)) + s.cfg.Capacity,
 		MinWorkers: common.AutomaticalMinWorkerCount(
-			s.cfg.Capacity*uint32(s.cfg.ConnectionChannels), 128),
+			(s.cfg.Capacity*uint32(s.cfg.ConnectionChannels))+s.cfg.Capacity,
+			128),
 		MaxWorkerIdle:     s.cfg.IdleTimeout * 10,
 		JobReceiveTimeout: s.cfg.InitialTimeout,
 	}).Serve()
@@ -115,13 +116,9 @@ func (s *proxy) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		runner:  s.runner,
 		mapping: s.mapping,
 		cfg:     s.cfg,
-	}, s.logger, server.Config{
-		MaxWorkers: s.cfg.Capacity,
-		MinWorkers: common.AutomaticalMinWorkerCount(
-			s.cfg.Capacity, 64),
-		MaxWorkerIdle:      s.cfg.IdleTimeout * 20,
-		AcceptErrorWait:    300 * time.Millisecond,
-		AcceptorPerWorkers: 1024,
+	}, s.logger, s.runner, server.Config{
+		AcceptErrorWait: 300 * time.Millisecond,
+		MaxConnections:  s.cfg.Capacity,
 	}).Serve()
 
 	if serveErr != nil {
@@ -138,8 +135,11 @@ func (s *proxy) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 }
 
 func (s *proxy) Unspawn() error {
+	s.logger.Infof("Closing")
+
 	if s.timeoutTicker != nil {
 		s.timeoutTicker.Stop()
+		s.timeoutTicker = nil
 	}
 
 	if s.serving != nil {
@@ -150,6 +150,8 @@ func (s *proxy) Unspawn() error {
 
 			return closeErr
 		}
+
+		s.serving = nil
 	}
 
 	if s.runner != nil {
@@ -161,11 +163,13 @@ func (s *proxy) Unspawn() error {
 
 			return runnerCloseErr
 		}
+
+		s.runner = nil
 	}
 
-	s.unspawnNotifier <- struct{}{}
+	s.logger.Infof("Server is closed")
 
-	s.logger.Infof("Server is down")
+	s.unspawnNotifier <- struct{}{}
 
 	return nil
 }

@@ -25,6 +25,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/roles/common/network/resolve"
 	"github.com/reinit/coward/roles/common/relay"
 	"github.com/reinit/coward/roles/proxy/common"
@@ -37,7 +38,8 @@ type udpMappingRelay struct {
 	listenIP       net.IP
 }
 
-func (u *udpMappingRelay) Initialize(server relay.Server) error {
+func (u *udpMappingRelay) Initialize(
+	l logger.Logger, server relay.Server) error {
 	spLocalHost, _, spLocalErr := net.SplitHostPort(u.localAddr.String())
 
 	if spLocalErr != nil {
@@ -60,7 +62,7 @@ func (u *udpMappingRelay) Initialize(server relay.Server) error {
 }
 
 func (u *udpMappingRelay) Client(
-	server relay.Server) (io.ReadWriteCloser, error) {
+	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
 	resolved, resolveErr := resolve.DNS(u.resolveTimeout).Resolve(u.mapped.Host)
 
 	if resolveErr != nil {

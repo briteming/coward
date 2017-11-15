@@ -25,6 +25,8 @@ import (
 	"io"
 	"net"
 	"time"
+
+	"github.com/reinit/coward/roles/common/network"
 )
 
 // Errors
@@ -42,7 +44,7 @@ type conn struct {
 	addr                *net.UDPAddr
 	clients             *clients
 	deadlineTicker      <-chan time.Time
-	ipPort              ipport
+	ipPort              network.ConnectionID
 	currentReader       *rbuffer
 	readerDeliver       chan *rbuffer
 	readDeadline        time.Time

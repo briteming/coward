@@ -25,6 +25,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/relay"
 )
@@ -36,11 +37,12 @@ type tcpRelay struct {
 	dial              network.Dial
 }
 
-func (c tcpRelay) Initialize(server relay.Server) error {
+func (c tcpRelay) Initialize(l logger.Logger, server relay.Server) error {
 	return nil
 }
 
-func (c tcpRelay) Client(server relay.Server) (io.ReadWriteCloser, error) {
+func (c tcpRelay) Client(
+	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
 	remoteConn, remoteDialErr := c.dial.Dial()
 
 	if remoteDialErr != nil {
