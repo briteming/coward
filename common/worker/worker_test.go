@@ -1,6 +1,6 @@
 //  Crypto-Obscured Forwarder
 //
-//  Copyright (C) 2017 Rui NI <ranqus@gmail.com>
+//  Copyright (C) 2018 Rui NI <ranqus@gmail.com>
 //
 //  This file is part of Crypto-Obscured Forwarder.
 //

@@ -1,6 +1,6 @@
 //  Crypto-Obscured Forwarder
 //
-//  Copyright (C) 2017 Rui NI <ranqus@gmail.com>
+//  Copyright (C) 2018 Rui NI <ranqus@gmail.com>
 //
 //  This file is part of Crypto-Obscured Forwarder.
 //
@@ -23,6 +23,6 @@ package application
 // Copyright information of current COWARD code
 const (
 	Name      = "Crypto-Obscured Forwarder"
-	Copyright = "Copyright (C) 2017, Rui NI <ranqus@gmail.com>"
+	Copyright = "Copyright (C) 2018, Rui NI <ranqus@gmail.com>"
 	URL       = "https://github.com/reinit/coward"
 )
