@@ -1,0 +1,64 @@
+
+                        COWARD Vulnerabilities
+
+                Copyright (C) 2018 Rui NI <ranqus@gmail.com>
+
+  This file is a part of COWARD project (the project), and must be carried
+  along with any form of distributions of the project. Changing the content
+  of this specific file is not permitted.
+
+-----------------------------------------------------------------------------
+
+  COWARD is not designed to handle large amount of heavy duty, rather, it
+been designed for personal use.
+
+  Because of this, some design decisions has been made in favor of easier
+maintaince, instead of better performance.
+
+  Here is some known issues caused by such decisions and their effect, please
+evaluate those issues before decide whether or not to put this project to
+actual use:
+
+  * UDP connection detetion is simulated
+
+    UDP didn't have connection state. We don't actually know whether or not
+  the UDP port can be closed.
+
+    So, we will setup a timer to record the last activtiy of the UDP port,
+  and close the port if it remain idle for a certain time.
+
+    You can configure the length of idle by adjust the `Timeout` setting.
+
+  * Connection half-close is not supported
+
+    In COWARD, we treat both Read-Close and Write-Close signals as close
+  signal that will tear down the whole connection.
+
+    If your application require such feature, please don't use COWARD.
+
+  * Relay operation can be blocked by slow client connection
+
+    Relay is used to transfer data between a server (Transceiver) connection
+  and a client.
+
+    The mechanism is simple: When data arrived from a server connection, copy
+  the data and send to client. When data arrived from client, copy and send
+  it to server.
+
+    However, when something in the chain of call (.Write method of a TCP
+  connection example) blocks, then the relay operation will be stopped.
+
+    In some type of connection (TCP speifically), the client can be easily
+  manufactured by slowing down data receive to trigger server-side TCP data
+  congestion.
+
+    Due to design of COWARD network protocol, this can cause serious problem
+  as the Transceiver when running in mulitplex mode, will wait until a segment
+  of data been completely readed before switching to the next segment.
+
+    A blocked write can prevent Transceiver from switching, thus entire data
+  transmission will be blocked.
+
+    To reduce the effect caused by this flaw, do not use mulitplex (by setting
+  the Channels to 1). However, doing so will increase memory consumption of the
+  application.
