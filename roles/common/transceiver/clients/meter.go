@@ -32,19 +32,19 @@ type meter struct {
 	current     *priority
 	requesters  *requesters
 	destination *destination
-	lock        *sync.RWMutex
+	lock        *sync.Mutex
 }
 
 type meterConnectionStopper struct {
 	requesters *requesters
 	stopper    timer.Stopper
-	lock       *sync.RWMutex
+	lock       *sync.Mutex
 }
 
 type meterRequestStopper struct {
 	dest    *destination
 	stopper timer.Stopper
-	lock    *sync.RWMutex
+	lock    *sync.Mutex
 }
 
 func (m meterConnectionStopper) Stop() time.Duration {

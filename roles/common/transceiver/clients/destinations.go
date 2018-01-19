@@ -87,7 +87,7 @@ func (d *destinations) Request(
 	req transceiver.BalancedRequestBuilder,
 	cancel <-chan struct{},
 	requesters *requesters,
-	lock *sync.RWMutex,
+	lock *sync.Mutex,
 ) error {
 	var retriable bool
 	var reqErr error

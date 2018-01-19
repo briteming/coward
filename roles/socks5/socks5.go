@@ -23,9 +23,9 @@ package socks5
 import (
 	"time"
 
-	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/role"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/network/server"
 	"github.com/reinit/coward/roles/common/transceiver"
@@ -149,19 +149,10 @@ func (s *socks5) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 func (s *socks5) Unspawn() error {
 	s.log.Infof("Closing")
 
-	if s.serverServing != nil {
-		serverCloseErr := s.serverServing.Close()
-
-		if serverCloseErr != nil {
-			s.log.Errorf("Failed to close server due to error: %s",
-				serverCloseErr)
-
-			return serverCloseErr
-		}
-
-		s.serverServing = nil
-	}
-
+	// It seems a bit counterintuitive, but we had to shutdown transceiver
+	// first to prevent ongoing requests block the server from shutting down
+	// (consider when requests running on a dead transceiver connection waiting
+	// for relay to confirm it's close signal)
 	if s.transceiver != nil {
 		trsmCloseErr := s.transceiver.Close()
 
@@ -173,6 +164,19 @@ func (s *socks5) Unspawn() error {
 		}
 
 		s.transceiver = nil
+	}
+
+	if s.serverServing != nil {
+		serverCloseErr := s.serverServing.Close()
+
+		if serverCloseErr != nil {
+			s.log.Errorf("Failed to close server due to error: %s",
+				serverCloseErr)
+
+			return serverCloseErr
+		}
+
+		s.serverServing = nil
 	}
 
 	if s.transceiverReadTimeoutTicker != nil {

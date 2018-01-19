@@ -42,7 +42,8 @@ type clients struct {
 	clients      []transceiver.Client
 	requesters   requesters
 	destinations destinations
-	bootLock     sync.RWMutex
+	requestLock  sync.Mutex
+	bootLock     sync.Mutex
 	booted       bool
 }
 
@@ -62,8 +63,9 @@ func New(clis []transceiver.Client, maxDestinations int) transceiver.Balancer {
 				maxSize: maxDestinations,
 			},
 		},
-		bootLock: sync.RWMutex{},
-		booted:   false,
+		requestLock: sync.Mutex{},
+		bootLock:    sync.Mutex{},
+		booted:      false,
 	}
 }
 
@@ -166,5 +168,5 @@ func (c *clients) Request(
 	cancel <-chan struct{},
 ) error {
 	return c.destinations.Request(
-		log, dest, req, cancel, &c.requesters, &c.bootLock)
+		log, dest, req, cancel, &c.requesters, &c.requestLock)
 }

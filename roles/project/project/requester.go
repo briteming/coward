@@ -110,6 +110,7 @@ type requester struct {
 	rw                    rw.ReadWriteDepleteDoner
 	log                   logger.Logger
 	serverPingDelay       time.Duration
+	noCloseSignalToRemote bool
 }
 
 // Bootup startup requests
@@ -148,6 +149,8 @@ func (h *requester) Bootup() (fsm.State, error) {
 	_, rErr = io.ReadFull(h.rw, h.buf[:2])
 
 	if rErr != nil {
+		rw.WriteFull(h.rw, []byte{join.RespondClientQuit})
+
 		return nil, rErr
 	}
 
@@ -421,19 +424,16 @@ func (h *requester) wait(f fsm.FSM) error {
 		return nil
 
 	case join.RequestClientRelease: // Notice Release is the last remote signal
-		kaStopErr := h.stopKeepalive()
+		h.stopKeepalive()
 
 		select {
 		case h.keepAliveTickResume <- requesterKeepAliveTickResumer{
 			resumer: nil,
 			is:      requesterKeepAliveTickResumePing, // Fake
 		}:
-			// If we successfully write the Resume, meaning we are the only
-			// command running now, go straight shutdown
 			<-h.keepAliveTickResume
 
 		case resumeChan := <-h.keepAliveTickResume:
-			// If something in the Resume, something are still going on.
 			if !resumeChan.Is(requesterKeepAliveTickResumeQuit) {
 				return ErrHandlerWaitUnexpectedRelease
 			}
@@ -441,9 +441,10 @@ func (h *requester) wait(f fsm.FSM) error {
 		default:
 		}
 
-		if kaStopErr != nil {
-			return kaStopErr
-		}
+		return f.Shutdown()
+
+	case join.RequestClientKill:
+		h.noCloseSignalToRemote = true
 
 		return f.Shutdown()
 
@@ -573,10 +574,12 @@ func (h *requester) Shutdown() error {
 		h.currentRelay = nil
 	}
 
-	_, wErr := rw.WriteFull(h.rw, []byte{join.RespondClientQuit})
+	if !h.noCloseSignalToRemote {
+		_, wErr := rw.WriteFull(h.rw, []byte{join.RespondClientQuit})
 
-	if wErr != nil {
-		return wErr
+		if wErr != nil {
+			return wErr
+		}
 	}
 
 	h.log.Debugf("Bye")

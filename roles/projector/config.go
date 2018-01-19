@@ -37,6 +37,7 @@ type Server struct {
 	RequestTimeout time.Duration
 	Protocol       network.Protocol
 	Capacity       uint32
+	Retries        uint8
 }
 
 // Config Configuration
@@ -45,19 +46,24 @@ type Config struct {
 	Capacity             uint32
 	InitialTimeout       time.Duration
 	IdleTimeout          time.Duration
+	RequestRetries       uint8
 	ConnectionChannels   uint8
 	ChannelDispatchDelay time.Duration
 }
 
-// GetAllServerIDs returns the ID of all servers in an array
-func (c Config) GetAllServerIDs() []projection.ID {
-	ids := make([]projection.ID, len(c.Servers))
+// GetAllServerRegisterations return projection registeration for all
+// servers
+func (c Config) GetAllServerRegisterations() []projection.Register {
+	servers := make([]projection.Register, len(c.Servers))
 
 	for iIndex := range c.Servers {
-		ids[iIndex] = c.Servers[iIndex].ID
+		servers[iIndex] = projection.Register{
+			ID:      c.Servers[iIndex].ID,
+			Retries: c.Servers[iIndex].Retries,
+		}
 	}
 
-	return ids
+	return servers
 }
 
 // GetTotalServerCapacity returns total server capacity

@@ -102,18 +102,12 @@ func (s *projector) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 	}
 
 	// Start Corunner
-	transceiverCap := s.cfg.Capacity * uint32(s.cfg.ConnectionChannels) * 2
-	reasonableCap := s.cfg.GetTotalServerCapacity()
-
-	if reasonableCap < transceiverCap {
-		reasonableCap = transceiverCap
-	}
-
-	reasonableCap += 2
+	startWorkers := s.cfg.GetTotalServerCapacity() +
+		(s.cfg.Capacity * uint32(s.cfg.ConnectionChannels) * 2)
 
 	runner, runnerServeErr := worker.New(s.logger, worker.Config{
-		MaxWorkers:        reasonableCap,
-		MinWorkers:        common.AutomaticalMinWorkerCount(reasonableCap, 128),
+		MaxWorkers:        startWorkers,
+		MinWorkers:        common.AutomaticalMinWorkerCount(startWorkers, 128),
 		MaxWorkerIdle:     s.cfg.IdleTimeout * 10,
 		JobReceiveTimeout: s.cfg.InitialTimeout,
 	}).Serve()
@@ -130,7 +124,7 @@ func (s *projector) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		s.runner, s.serverTimeoutTicker.C, projection.Config{
 			MaxReceivers:   s.cfg.Capacity,
 			RequestTimeout: s.cfg.InitialTimeout,
-			Projects:       s.cfg.GetAllServerIDs(),
+			Projects:       s.cfg.GetAllServerRegisterations(),
 		})
 
 	// Bootup project servers

@@ -156,15 +156,15 @@ func (c *ConfigProject) Verify() error {
 type ConfigInput struct {
 	components     []interface{}
 	selectedCodec  transceiver.Codec
-	Host           string          `json:"host" cfg:"h,-host:Host name of the remote COWARD Projector server.\r\n\r\nMust matchs the setting on server."`
-	Port           uint16          `json:"port" cfg:"p,-port:Register port of the remote COWARD Projector server.\r\n\r\nMust matchs the setting on server."`
-	Timeout        uint16          `json:"timeout" cfg:"t,-timeout:The maximum idle time in second of the established connection.\r\n\r\nIf the connection consecutively idle during this period of time, then that connection will be considered as inactive and thus be disconnected.\r\n\r\nIt is recommended to set this value no greater than the related one on the COWARD Projector server setting."`
-	RequestTimeout uint16          `json:"request_timeout" cfg:"rt,-request-timeout:The maximum wait time in second for the server to respond the Initial request of a client.\r\n\r\nIf the COWARD Projector server has failed to respond the Initial request within this period of time, the connection will be considered broken and thus be closed.\r\n\r\nIt is recommended to set this value slightly greater than the \"--initial-timeout\" setting on the COWARD Projector server."`
-	Channels       uint8           `json:"channels" cfg:"n,-channels:How many requests can be simultaneously opened on a single established connection.\r\n\r\nSet the value greater than 1 so a single connection can be use to transport multiple requests (Multiplexing).\r\n\r\nWARNING:\r\nThis value must matchs or smaller than the related setting on the COWARD Projector server, otherwise the request will be come malformed and thus dropped."`
-	Persistent     bool            `json:"persist" cfg:"k,-persist:Whether or not to keep the connection to the COWARD Projector active after all requests on the connection is completed."`
-	Projects       []ConfigProject `json:"projects" cfg:"s,-projects:Whether or not to keep the connection to the COWARD Projector active after all requests on the connection is completed."`
-	Codec          string          `json:"codec" cfg:"e,-codec:Specify which Codec will be used to encode and decode  data payload to and from a connection."`
-	CodecSetting   string          `json:"codec_setting" cfg:"es,-codec-cfg:Configuration of the Codec.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
+	Host           string           `json:"host" cfg:"h,-host:Host name of the remote COWARD Projector server.\r\n\r\nMust matchs the setting on server."`
+	Port           uint16           `json:"port" cfg:"p,-port:Registeration port of the remote COWARD Projector server.\r\n\r\nMust matchs the setting on server."`
+	Timeout        uint16           `json:"timeout" cfg:"t,-timeout:The maximum idle time in second of the established connection.\r\n\r\nIf a connection is consecutively idle during this period of time, then that connection will be considered as inactive and thus be disconnected.\r\n\r\nIt is recommended to set this value no greater than the related one on the COWARD Projector server setting."`
+	RequestTimeout uint16           `json:"request_timeout" cfg:"rt,-request-timeout:The maximum wait time in second for the server to respond the Initial request of a client.\r\n\r\nIf the COWARD Projector server has failed to respond the Initial request within this period of time, the connection will be considered broken and thus be closed.\r\n\r\nIt is recommended to set this value slightly greater than the \"--initial-timeout\" setting on the COWARD Projector server."`
+	Channels       uint8            `json:"channels" cfg:"n,-channels:How many requests can be simultaneously opened on a single established connection.\r\n\r\nSet the value greater than 1 so a single connection can be use to transport multiple requests (Multiplexing).\r\n\r\nWARNING:\r\nThis value must matchs or smaller than the related setting on the COWARD Projector server, otherwise the request will be come malformed and thus dropped."`
+	Persistent     bool             `json:"persist" cfg:"k,-persist:Whether or not to keep the connection to the COWARD Projector active after all requests on the connection is completed."`
+	Projects       []*ConfigProject `json:"projects" cfg:"s,-projects:Pre-defined project destnations.\r\n\r\nMust be exist on the COWARD Projector server."`
+	Codec          string           `json:"codec" cfg:"e,-codec:Specify which Codec will be used to encode and decode data payload to and from a connection."`
+	CodecSetting   string           `json:"codec_setting" cfg:"es,-codec-cfg:Configuration of the Codec.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
 }
 
 // GetDescription get descriptions
@@ -326,7 +326,7 @@ func Role() role.Registration {
 				RequestTimeout: 0,
 				Channels:       0,
 				Persistent:     false,
-				Projects:       []ConfigProject{},
+				Projects:       []*ConfigProject{},
 				Codec:          "",
 				CodecSetting:   "",
 			}
@@ -371,8 +371,9 @@ func Role() role.Registration {
 						cfg.Timeout) * time.Second,
 					TransceiverInitialTimeout: time.Duration(
 						cfg.RequestTimeout) * time.Second,
-					TransceiverChannels: cfg.Channels,
-					Endpoints:           endpoints,
+					TransceiverChannels:             cfg.Channels,
+					TransceiverConnectionPersistent: cfg.Persistent,
+					Endpoints:                       endpoints,
 				}), nil
 		},
 	}

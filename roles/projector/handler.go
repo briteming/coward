@@ -65,16 +65,27 @@ func (d handler) New(
 }
 
 func (d client) Serve() error {
+	closeNotify := make(chan struct{})
+	defer close(closeNotify)
+
 	buf := [4096]byte{}
 
 	return d.transceiver.Handle(
 		d.logger,
 		d.conn,
-		command.New(join.New(d.projections, d.runner, d.logger, join.Config{
-			ConnectionID:    d.conn.ID(),
-			ConnectionDelay: timer.Average(),
-			Buffer:          buf[:],
-			Timeout:         d.minTimeout,
-		})),
+		command.New(join.New(
+			d.projections,
+			d.conn,
+			closeNotify,
+			d.runner,
+			d.logger,
+			join.Config{
+				ConnectionID:    d.conn.ID(),
+				ConnectionDelay: timer.Average(),
+				Buffer:          buf[:],
+				Timeout:         d.minTimeout,
+				ClientTimeout:   d.cfg.IdleTimeout,
+			},
+		)),
 	)
 }

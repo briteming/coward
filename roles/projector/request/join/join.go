@@ -24,32 +24,38 @@ import (
 	"github.com/reinit/coward/common/fsm"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
-	"github.com/reinit/coward/common/timer"
 	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/command"
+	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/projector/projection"
 	"github.com/reinit/coward/roles/projector/request"
 )
 
 // join Join request handler
 type join struct {
-	logger     logger.Logger
-	cfg        Config
-	runner     worker.Runner
-	registered registerations
+	logger                logger.Logger
+	cfg                   Config
+	runner                worker.Runner
+	parentConn            network.Connection
+	parentConnCloseNotify chan struct{}
+	registered            registerations
 }
 
 // New creates a new join request
 func New(
 	projections projection.Projections,
+	parentConn network.Connection,
+	parentConnCloseNotify chan struct{},
 	runner worker.Runner,
 	logger logger.Logger,
 	cfg Config,
 ) command.Command {
 	return join{
-		logger: logger,
-		cfg:    cfg,
-		runner: runner,
+		logger:                logger,
+		cfg:                   cfg,
+		runner:                runner,
+		parentConn:            parentConn,
+		parentConnCloseNotify: parentConnCloseNotify,
 		registered: registerations{
 			projections: projections,
 			receivers: make(
@@ -69,16 +75,18 @@ func (j join) New(rw rw.ReadWriteDepleteDoner) fsm.Machine {
 		logger:                      j.logger,
 		cfg:                         j.cfg,
 		runner:                      j.runner,
+		parentConn:                  j.parentConn,
+		parentConnCloseNotify:       j.parentConnCloseNotify,
 		registered:                  j.registered,
 		rw:                          rw,
 		currentProjectionID:         0,
 		currentReceiveResult:        nil,
 		currentReceiver:             nil,
 		currentReceivedAccessorChan: make(chan projection.Accessor, 1),
-		currentReceivedAccessor: projection.Accessor{
-			Access: nil, Error: nil},
-		currentRemotePingTimer: make(chan timer.Stopper, 1),
-		currentRelay:           nil,
-		receivingCloser:        make(chan struct{}),
+		currentReceivedAccessor:     nil,
+		currentRemotePingTimer:      nil,
+		currentRelay:                nil,
+		receivingCloser:             make(chan struct{}),
+		noCloseSignalToRemote:       false,
 	}
 }

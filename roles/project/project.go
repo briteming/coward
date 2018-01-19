@@ -123,7 +123,7 @@ func (s *projectile) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 			RequestRetries:       1, // We'll do retry manually
 			IdleTimeout:          s.cfg.TransceiverIdleTimeout,
 			InitialTimeout:       s.cfg.TransceiverInitialTimeout,
-			ConnectionPersistent: true, // Always use persistent connection
+			ConnectionPersistent: s.cfg.TransceiverConnectionPersistent,
 			ConnectionChannels:   s.cfg.TransceiverChannels,
 		}).Serve()
 

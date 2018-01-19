@@ -86,7 +86,7 @@ type ConfigInput struct {
 	Channels             uint8           `json:"channels" cfg:"n,-channels:How many requests can be simultaneously opened on a single established connection.\r\n\r\nSet the value greater than 1 so a single connection will be allowed to transport multiple requests (Multiplexing). This is very useful to increase the utility of a stable connection.\r\n\r\nWhen the connection is not stable enough however, too many Connection Channels can reduce overall stabililty."`
 	ChannelDispatchDelay uint16          `json:"channel_dispatch_delay" cfg:"cd,-channel-delay:A delay of time in millisecond in between Connection Channel data dispatch operations.\r\n\r\nThe main propose of this setting is to limit the CPU usage of the Connection Channel data dispatch. However, it can also in part be use to control the server's connection bandwidth (Higher the delay, lower the bandwidth and CPU usage)."`
 	Mapping              []ConfigMapping `json:"mapping" cfg:"m,-mapping:Pre-defined local and remote destinations.\r\n\r\nYou can define both local and remote destinations as server will not enforce access limitation here (In opposite of the dynamical Connect request, which will deny all local accesses)."`
-	Codec                string          `json:"codec" cfg:"e,-codec:Specify which Codec will be used to encode and decode  data payload to and from a connection."`
+	Codec                string          `json:"codec" cfg:"e,-codec:Specify which Codec will be used to encode and decode data payload to and from a connection."`
 	CodecSetting         string          `json:"codec_setting" cfg:"es,-codec-cfg:Configuration of the Codec.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
 }
 

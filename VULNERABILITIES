@@ -3,10 +3,6 @@
 
                 Copyright (C) 2018 Rui NI <ranqus@gmail.com>
 
-  This file is a part of COWARD project (the project), and must be carried
-  along with any form of distributions of the project. Changing the content
-  of this specific file is not permitted.
-
 -----------------------------------------------------------------------------
 
   COWARD is not designed to handle large amount of heavy duty, rather, it
@@ -62,3 +58,16 @@ actual use:
     To reduce the effect caused by this flaw, do not use mulitplex (by setting
   the Channels to 1). However, doing so will increase memory consumption of the
   application.
+
+  * We don't detect client drop during request initialization
+
+    You may have noticed that when received a request, the procedure of request
+  initialization will not be affected by the requesting client, even when the
+  client decided to drop it's connection.
+
+    This is because we don't read the connection before it can be relayed or the
+  request has failed as doing so will increase the memory consumption of the
+  application.
+
+    Beaware of this if you plan to use this application in a system which
+  sensitive about such behaviour.

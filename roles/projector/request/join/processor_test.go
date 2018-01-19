@@ -56,20 +56,51 @@ func (d *dummyProjections) Handler(id projection.ID) (network.Handler, error) {
 	return nil, nil
 }
 
+type dummyAccessorResult struct {
+	err       error
+	retriable bool
+	reset     bool
+	wait      chan struct{}
+}
+
+type dummyAccessor struct {
+	access network.Connection
+	result chan dummyAccessorResult
+	rr     worker.Runner
+}
+
+func (d dummyAccessor) Access() network.Connection {
+	return d.access
+}
+
+func (d dummyAccessor) Result(
+	e error, retriable bool, reset bool, wait chan struct{}) {
+	d.result <- dummyAccessorResult{
+		err: e, retriable: retriable, reset: reset, wait: wait}
+}
+
+func (d dummyAccessor) Runner() worker.Runner {
+	return d.rr
+}
+
+func (d dummyAccessor) Proccessor(p projection.Proccessor) {}
+
 type dummyProjection struct {
 	id         projection.ID
 	accessChan chan projection.Accessor
 }
 
 func (d *dummyProjection) Receive(c network.Connection) error {
-	aa := projection.Accessor{
-		Access: c,
-		Error:  make(chan error),
+	aa := dummyAccessor{
+		access: c,
+		result: make(chan dummyAccessorResult),
 	}
 
 	d.accessChan <- aa
 
-	return <-aa.Error
+	result := <-aa.result
+
+	return result.err
 }
 
 func (d *dummyProjection) Receiver() projection.Receiver {
@@ -229,6 +260,8 @@ func (d *dummyNetworkConnection) Write(b []byte) (int, error) {
 	return d.rw.Write(b)
 }
 
+func (d *dummyNetworkConnection) SetTimeout(t time.Duration) {}
+
 func (d *dummyNetworkConnection) Close() error {
 	return nil
 }
@@ -281,10 +314,10 @@ func TestProccessor(t *testing.T) {
 						written:       bytes.NewBuffer(make([]byte, 0, 4096)),
 					},
 				}
-				acc := projection.Accessor{
-					Access: accConn,
-					Error:  make(chan error),
-					Runner: rr,
+				acc := dummyAccessor{
+					access: accConn,
+					result: make(chan dummyAccessorResult),
+					rr:     rr,
 				}
 
 				dp1.accessChan <- acc
@@ -368,7 +401,30 @@ func TestProccessor(t *testing.T) {
 				clientConn.readChan <- bytes.NewBuffer([]byte{
 					byte(relay.SignalClose)})
 
-				<-acc.Error
+				accResult := <-acc.result
+
+				if accResult.wait != nil {
+					<-accResult.wait
+				}
+
+				if accResult.err != nil {
+					t.Errorf("Expecting no error after relay close, got %s",
+						accResult.err)
+
+					return
+				}
+
+				if accResult.retriable {
+					t.Errorf("There must be no Retry after relay close")
+
+					return
+				}
+
+				if accResult.reset {
+					t.Errorf("There must be no Reset after relay close")
+
+					return
+				}
 			}
 
 			clientConn.readChan <- bytes.NewBuffer([]byte{

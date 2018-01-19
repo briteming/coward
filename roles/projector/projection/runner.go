@@ -48,9 +48,13 @@ func (r runner) Run(
 		Result: make(chan error, 1),
 	}
 
-	r.callReceive <- callInfo
+	select {
+	case r.callReceive <- callInfo:
+		return callInfo.Result, nil
 
-	return callInfo.Result, nil
+	case <-cancel:
+		return nil, worker.ErrJobJoinCanceled
+	}
 }
 
 // RunWait add, execute the job and wait for the result

@@ -121,8 +121,7 @@ type channelize struct {
 	channelsLock      sync.Mutex
 	dispatchCompleted chan struct{}
 	downSignal        chan struct{}
-	downIgniter       chan struct{}
-	downNotify        chan struct{}
+	downed            bool
 	writeBuffer       channelWriteBuf
 	writeLock         sync.Mutex
 }
@@ -164,9 +163,8 @@ func Channelize(
 		channels:          [ch.MaxChannels]*channel{},
 		channelsLock:      sync.Mutex{},
 		dispatchCompleted: make(chan struct{}, 1),
-		downSignal:        make(chan struct{}, 1),
-		downNotify:        make(chan struct{}),
-		downIgniter:       make(chan struct{}, 1),
+		downSignal:        make(chan struct{}),
+		downed:            false,
 		writeBuffer:       channelWriteBuf{},
 		writeLock:         sync.Mutex{},
 	}
@@ -175,7 +173,7 @@ func Channelize(
 // Closed returns a channel that will be closed when current Channelizer
 // is down
 func (c *channelize) Closed() <-chan struct{} {
-	return c.downNotify
+	return c.downSignal
 }
 
 // Timeout set the read timeout
@@ -200,15 +198,13 @@ func (c *channelize) Dispatch(channels ch.Channels) (ch.ID, fsm.FSM, error) {
 
 		return 0, nil, ErrChannelConnectionDropped
 
-	case d := <-c.downSignal: // Unblock dispatchCompleted with a Channel
+	case <-c.downSignal: // Unblock dispatchCompleted with a Channel
 		// Forget about dispatchCompleted, we're downing
 		if c.dispatchCompleted != nil {
 			close(c.dispatchCompleted)
 
 			c.dispatchCompleted = nil
 		}
-
-		c.downSignal <- d
 
 		return 0, nil, ErrChannelShuttedDown
 	}
@@ -258,15 +254,13 @@ func (c *channelize) Dispatch(channels ch.Channels) (ch.ID, fsm.FSM, error) {
 
 		return 0, nil, ErrChannelConnectionDropped
 
-	case d := <-c.downSignal:
+	case <-c.downSignal:
 		if c.dispatchCompleted != nil {
 			<-c.dispatchCompleted
 
 			close(c.dispatchCompleted)
 			c.dispatchCompleted = nil
 		}
-
-		c.downSignal <- d
 
 		return 0, nil, ErrChannelShuttedDown
 	}
@@ -307,26 +301,15 @@ func (c *channelize) Shutdown() error {
 	c.channelsLock.Lock()
 	defer c.channelsLock.Unlock()
 
-	select {
-	case c.downIgniter <- struct{}{}:
-		downIgniter := c.downIgniter
-		c.downIgniter = nil
-		<-downIgniter
-
-		close(c.downNotify)
-		close(downIgniter)
-
-		c.downSignal <- struct{}{}
-
-	default:
+	if c.downed {
 		return ErrChannelShuttedDown
 	}
 
-	for cIdx := range c.channels {
-		if c.channels[cIdx] == nil {
-			continue
-		}
+	c.downed = true
 
+	close(c.downSignal)
+
+	for cIdx := range c.channels {
 		c.channels[cIdx] = nil
 	}
 
@@ -413,9 +396,7 @@ func (c *channel) Read(b []byte) (int, error) {
 			case <-c.connClosed:
 				return 0, ErrChannelConnectionDropped
 
-			case d := <-c.downSignal:
-				c.downSignal <- d
-
+			case <-c.downSignal:
 				return 0, ErrChannelShuttedDown
 
 			case <-timeoutTicker:

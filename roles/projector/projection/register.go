@@ -20,11 +20,8 @@
 
 package projection
 
-import "time"
-
-// Config Projection configuration
-type Config struct {
-	MaxReceivers   uint32
-	RequestTimeout time.Duration
-	Projects       []Register
+// Register projection registeration information
+type Register struct {
+	ID      ID
+	Retries uint8
 }

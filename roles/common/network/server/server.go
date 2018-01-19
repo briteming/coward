@@ -312,6 +312,10 @@ func (s serving) Close() error {
 
 	s.server.downNotify <- struct{}{}
 
+	defer func() {
+		<-s.server.downNotify
+	}()
+
 	cErr := s.accepter.Close()
 
 	if cErr != nil {
@@ -321,7 +325,6 @@ func (s serving) Close() error {
 	s.server.downWait.Wait()
 
 	s.server.serving = false
-	<-s.server.downNotify
 
 	return nil
 }

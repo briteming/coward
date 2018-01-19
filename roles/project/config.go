@@ -42,8 +42,9 @@ func (p Endpoints) TotalConnections() uint32 {
 
 // Config Projectile Configuration
 type Config struct {
-	TransceiverIdleTimeout    time.Duration
-	TransceiverInitialTimeout time.Duration
-	TransceiverChannels       uint8
-	Endpoints                 Endpoints
+	TransceiverIdleTimeout          time.Duration
+	TransceiverInitialTimeout       time.Duration
+	TransceiverChannels             uint8
+	TransceiverConnectionPersistent bool
+	Endpoints                       Endpoints
 }

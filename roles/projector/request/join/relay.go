@@ -22,6 +22,7 @@ package join
 
 import (
 	"io"
+	"time"
 
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/roles/common/network"
@@ -30,7 +31,34 @@ import (
 
 // requestRelay builds a request relay
 type requestRelay struct {
-	client network.Connection
+	client  network.Connection
+	timeout time.Duration
+}
+
+// relayClient wraps the Accessor connection
+type relayClient struct {
+	network.Connection
+
+	timeout         time.Duration
+	timeoutExpanded bool
+}
+
+// Read read the Accessor Conn and update it's timeout when needed
+func (r *relayClient) Read(b []byte) (int, error) {
+	rLen, rErr := r.Connection.Read(b)
+
+	if rErr != nil || r.timeoutExpanded {
+		return rLen, rErr
+	}
+
+	// We only expand the timeout when the client successfully sent
+	// it's first message. Otherwise the client may aleady down without
+	// us knowing it.
+	r.Connection.SetTimeout(r.timeout)
+
+	r.timeoutExpanded = true
+
+	return rLen, rErr
 }
 
 // Initialize does nothing
@@ -41,5 +69,11 @@ func (r requestRelay) Initialize(l logger.Logger, server relay.Server) error {
 // Client returns the client
 func (r requestRelay) Client(
 	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
-	return r.client, nil
+	r.client.SetTimeout(r.timeout)
+
+	return &relayClient{
+		Connection:      r.client,
+		timeout:         r.timeout,
+		timeoutExpanded: false,
+	}, nil
 }

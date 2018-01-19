@@ -29,6 +29,7 @@ import (
 	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/common/timer"
 	"github.com/reinit/coward/common/worker"
+	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/relay"
 	"github.com/reinit/coward/roles/projector/projection"
 )
@@ -77,8 +78,8 @@ const (
 	RespondClientRelayInitialized          = 0x10
 	RespondClientRelayInitializationFailed = 0x11
 	RespondClientPingRequest               = 0x20
-	RespondClientPingRespond               = 0x22
-	RespondClientRelease                   = 0x23
+	RespondClientPingRespond               = 0x23
+	RespondClientRelease                   = 0x24
 	RespondClientQuit                      = 0x25
 )
 
@@ -86,8 +87,9 @@ const (
 const (
 	RequestClientRelayRequest  = 0x00
 	RequestClientPingEmit      = 0x21
-	RequestClientRelease       = 0x24
-	RequestClientReleaseCancel = 0x26
+	RequestClientKill          = 0x22
+	RequestClientRelease       = 0x26
+	RequestClientReleaseCancel = 0x27
 )
 
 // processor Join request processor
@@ -95,6 +97,8 @@ type processor struct {
 	logger                      logger.Logger
 	cfg                         Config
 	runner                      worker.Runner
+	parentConn                  network.Connection
+	parentConnCloseNotify       chan struct{}
 	registered                  registerations
 	rw                          rw.ReadWriteDepleteDoner
 	currentProjectionID         projection.ID
@@ -102,9 +106,10 @@ type processor struct {
 	currentReceiver             projection.Receiver
 	currentReceivedAccessorChan chan projection.Accessor
 	currentReceivedAccessor     projection.Accessor
-	currentRemotePingTimer      chan timer.Stopper
+	currentRemotePingTimer      timer.Stopper
 	currentRelay                relay.Relay
 	receivingCloser             chan struct{}
+	noCloseSignalToRemote       bool
 }
 
 // Bootup initialize the request handler
@@ -167,6 +172,11 @@ func (p *processor) receiving(l logger.Logger) error {
 	for {
 		select {
 		case accessorReceiver := <-p.currentReceiver.Receive():
+			accessorReceiver.Proccessor(projection.Proccessor{
+				Proccessor: p.parentConn,
+				Waiter:     p.parentConnCloseNotify,
+			})
+
 			select {
 			case p.currentReceivedAccessorChan <- accessorReceiver:
 				_, wErr := rw.WriteFull(p.rw, []byte{RequestClientRelayRequest})
@@ -245,10 +255,7 @@ func (p *processor) wait(f fsm.FSM) error {
 
 	switch p.cfg.Buffer[0] {
 	case RespondClientRelease:
-		select {
-		case pingTimer := <-p.currentRemotePingTimer:
-			p.currentRemotePingTimer <- pingTimer
-
+		if p.currentRemotePingTimer != nil {
 			_, wErr := rw.WriteFull(p.rw, []byte{RequestClientReleaseCancel})
 
 			if wErr != nil {
@@ -256,8 +263,6 @@ func (p *processor) wait(f fsm.FSM) error {
 			}
 
 			return nil
-
-		default:
 		}
 
 		select {
@@ -316,6 +321,8 @@ func (p *processor) wait(f fsm.FSM) error {
 		return nil
 
 	case RespondClientQuit:
+		p.noCloseSignalToRemote = true
+
 		return f.Shutdown()
 
 	case RespondClientRelayInitialized:
@@ -344,11 +351,10 @@ func (p *processor) wait(f fsm.FSM) error {
 				return kaStopErr
 			}
 
-			p.currentReceivedAccessor.Error <- ErrProcessorWaitRelayInitFailed
-
-			p.currentReceivedAccessor.Runner = nil
-			p.currentReceivedAccessor.Access = nil
-			p.currentReceivedAccessor.Error = nil
+			// Don't retry this, since we already contacted a relay
+			p.currentReceivedAccessor.Result(
+				ErrProcessorWaitRelayInitFailed, true, false, nil)
+			p.currentReceivedAccessor = nil
 
 			return f.SwitchTick(p.reinit)
 
@@ -357,34 +363,34 @@ func (p *processor) wait(f fsm.FSM) error {
 		}
 
 	case RespondClientPingRequest:
-		select {
-		case p.currentRemotePingTimer <- p.cfg.ConnectionDelay.Start():
-			_, wErr := rw.WriteFull(p.rw, []byte{RequestClientPingEmit})
-
-			if wErr != nil {
-				return wErr
-			}
-
-			return nil
-
-		default:
+		if p.currentRemotePingTimer != nil {
 			return ErrProcessorWaitNotReadyToHandleClientPingRequest
 		}
 
+		p.currentRemotePingTimer = p.cfg.ConnectionDelay.Start()
+
+		_, wErr := rw.WriteFull(p.rw, []byte{RequestClientPingEmit})
+
+		if wErr != nil {
+			return wErr
+		}
+
+		return nil
+
 	case RespondClientPingRespond:
-		select {
-		case pingTimer := <-p.currentRemotePingTimer:
-			pingDelay := pingTimer.Stop()
-
-			p.registered.All(func(receiver projection.Receiver) {
-				receiver.Delay(pingDelay)
-			})
-
-			return nil
-
-		default:
+		if p.currentRemotePingTimer == nil {
 			return ErrProcessorWaitUnexpectedClientPingRespond
 		}
+
+		pingDelay := p.currentRemotePingTimer.Stop()
+
+		p.currentRemotePingTimer = nil
+
+		p.registered.All(func(receiver projection.Receiver) {
+			receiver.Delay(pingDelay)
+		})
+
+		return nil
 
 	default:
 		return ErrProcessorWaitUnknownRespondReceived
@@ -395,23 +401,23 @@ func (p *processor) wait(f fsm.FSM) error {
 func (p *processor) relayInit(f fsm.FSM) error {
 	p.currentRelay = relay.New(
 		p.logger,
-		p.currentReceivedAccessor.Runner,
+		p.currentReceivedAccessor.Runner(),
 		p.rw,
 		p.cfg.Buffer,
 		requestRelay{
-			client: p.currentReceivedAccessor.Access,
-		}, make([]byte, 4096))
+			client:  p.currentReceivedAccessor.Access(),
+			timeout: p.cfg.ClientTimeout,
+		},
+		make([]byte, 4096))
 
 	bootErr := p.currentRelay.Bootup(nil)
 
 	if bootErr != nil {
 		p.currentRelay = nil
 
-		p.currentReceivedAccessor.Error <- ErrProcessorAccessorRelayFailed
-
-		p.currentReceivedAccessor.Runner = nil
-		p.currentReceivedAccessor.Access = nil
-		p.currentReceivedAccessor.Error = nil
+		p.currentReceivedAccessor.Result(
+			ErrProcessorAccessorRelayFailed, true, false, nil)
+		p.currentReceivedAccessor = nil
 
 		return f.SwitchTick(p.reinit)
 	}
@@ -435,17 +441,17 @@ func (p *processor) relayRelay(f fsm.FSM) error {
 
 	p.currentRelay = nil
 
-	p.currentReceivedAccessor.Error <- nil
-
-	p.currentReceivedAccessor.Runner = nil
-	p.currentReceivedAccessor.Access = nil
-	p.currentReceivedAccessor.Error = nil
+	p.currentReceivedAccessor.Result(nil, false, false, nil)
+	p.currentReceivedAccessor = nil
 
 	return f.SwitchTick(p.reinit)
 }
 
 // Shutdown closes current processor
 func (p *processor) Shutdown() error {
+	doneWait := make(chan struct{})
+	defer close(doneWait)
+
 	p.stopReceiving()
 
 	// Close relay
@@ -456,6 +462,12 @@ func (p *processor) Shutdown() error {
 
 	// If there're accessors that didn't been picked up by relay, close it
 	// here
+	if p.currentReceivedAccessor != nil {
+		p.currentReceivedAccessor.Result(
+			ErrProcessorAccessorClosedForcely, false, false, doneWait)
+		p.currentReceivedAccessor = nil
+	}
+
 	select {
 	case currentReceivedAccessor := <-p.currentReceivedAccessorChan:
 		p.currentReceivedAccessor = currentReceivedAccessor
@@ -463,12 +475,14 @@ func (p *processor) Shutdown() error {
 	default:
 	}
 
-	if p.currentReceivedAccessor.Access != nil {
-		p.currentReceivedAccessor.Error <- ErrProcessorAccessorClosedForcely
+	if p.currentReceivedAccessor != nil {
+		p.currentReceivedAccessor.Result(
+			ErrProcessorAccessorClosedForcely, false, false, doneWait)
+		p.currentReceivedAccessor = nil
+	}
 
-		p.currentReceivedAccessor.Runner = nil
-		p.currentReceivedAccessor.Access = nil
-		p.currentReceivedAccessor.Error = nil
+	if !p.noCloseSignalToRemote {
+		rw.WriteFull(p.rw, []byte{RequestClientKill})
 	}
 
 	p.registered.Remove(p.currentProjectionID)

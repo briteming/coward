@@ -74,8 +74,8 @@ func New(
 	}
 
 	for pIdx := range cfg.Projects {
-		p.projections[cfg.Projects[pIdx]] = &projection{
-			id: cfg.Projects[pIdx],
+		p.projections[cfg.Projects[pIdx].ID] = &projection{
+			id: cfg.Projects[pIdx].ID,
 			receivers: receivers{
 				Head:      nil,
 				Tail:      nil,
@@ -84,6 +84,7 @@ func New(
 			},
 			receiveTimeoutTick: reqReceiveTick,
 			requestTimeout:     cfg.RequestTimeout,
+			requestRetries:     cfg.Projects[pIdx].Retries,
 		}
 	}
 

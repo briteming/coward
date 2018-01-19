@@ -21,6 +21,8 @@
 package join
 
 import (
+	"time"
+
 	"github.com/reinit/coward/common/timer"
 	"github.com/reinit/coward/roles/common/network"
 )
@@ -31,4 +33,5 @@ type Config struct {
 	ConnectionDelay timer.Timer
 	Buffer          []byte
 	Timeout         uint16
+	ClientTimeout   time.Duration
 }

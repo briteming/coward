@@ -81,6 +81,7 @@ func (p *project) persistRequest(
 		rw:                    server,
 		log:                   log,
 		serverPingDelay:       0,
+		noCloseSignalToRemote: false,
 	}
 }
 
@@ -112,6 +113,7 @@ func (p *project) request(
 		rw:                    server,
 		log:                   log,
 		serverPingDelay:       0,
+		noCloseSignalToRemote: false,
 	}
 }
 
@@ -136,6 +138,8 @@ func (p *project) handle(
 		request:    timer.New(),
 	}
 
+	skipRetrySleep := false
+
 	for {
 		select {
 		case <-p.closeSignal:
@@ -147,6 +151,8 @@ func (p *project) handle(
 			_, tReqErr := p.transceiver.Request(ll, reqBuilder, nil, m)
 
 			if tReqErr == nil {
+				skipRetrySleep = true
+
 				if retry {
 					ll.Debugf("Completed. Connection delay %s, request "+
 						"delay %s. Restarting",
@@ -163,6 +169,12 @@ func (p *project) handle(
 
 			if retry {
 				ll.Warningf("Can't serve due to error: %s. Restarting", tReqErr)
+
+				if skipRetrySleep {
+					skipRetrySleep = false
+
+					continue
+				}
 
 				retryAt := time.Now().Add(p.endpoint.RequestTimeout)
 

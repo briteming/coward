@@ -126,27 +126,28 @@ func (d dialers) TotalConcurrentConnections() uint32 {
 
 // client implements transceiver.Client
 type client struct {
-	id                   transceiver.ClientID
-	log                  logger.Logger
-	dialers              []dialer
-	codec                transceiver.CodecBuilder
-	cfg                  Config
-	bootLock             sync.Mutex
-	booted               bool
-	running              chan struct{}
-	channel              chan virtualChannel
-	totalChannels        uint32
-	connectionConnect    chan connectRequest
-	connectionConnected  chan connectedConnection
-	connectionFree       chan struct{}
-	connectionWait       sync.WaitGroup
-	connectionWorkers    uint32
-	connectionEnabled    chan struct{}
-	connectionClosing    chan struct{}
-	connectionCloserLock sync.Mutex
-	lastConnectionID     transceiver.ConnectionID
-	requestRetries       uint8
-	requestWaitTicker    <-chan time.Time
+	id                    transceiver.ClientID
+	log                   logger.Logger
+	dialers               []dialer
+	codec                 transceiver.CodecBuilder
+	cfg                   Config
+	bootLock              sync.Mutex
+	booted                bool
+	running               chan struct{}
+	channel               chan virtualChannel
+	totalChannels         uint32
+	maxChannels           uint32
+	connectionConnect     chan connectRequest
+	connectionConnected   chan connectedConnection
+	connectionFree        chan struct{}
+	connectionWait        sync.WaitGroup
+	connectionWorkers     uint32
+	connectionEnabled     chan struct{}
+	connectionClosing     chan struct{}
+	connectionCloserLocks []sync.Cond
+	lastConnectionID      transceiver.ConnectionID
+	requestRetries        uint8
+	requestWaitTicker     <-chan time.Time
 }
 
 // New creates a new transceiver.Client
@@ -181,18 +182,20 @@ func New(
 		running:  make(chan struct{}, cfg.MaxConcurrent),
 		channel: make(chan virtualChannel,
 			dls.TotalConcurrentConnections()*maxChannels),
-		totalChannels:        0,
-		connectionConnect:    make(chan connectRequest),
-		connectionConnected:  make(chan connectedConnection, cfg.MaxConcurrent),
-		connectionFree:       make(chan struct{}),
-		connectionWait:       sync.WaitGroup{},
-		connectionWorkers:    0,
-		connectionEnabled:    make(chan struct{}, 1),
-		connectionClosing:    nil,
-		connectionCloserLock: sync.Mutex{},
-		lastConnectionID:     0,
-		requestRetries:       cfg.RequestRetries,
-		requestWaitTicker:    requestWaitTicker,
+		totalChannels:       0,
+		maxChannels:         dls.TotalConcurrentConnections() * maxChannels,
+		connectionConnect:   make(chan connectRequest),
+		connectionConnected: make(chan connectedConnection, cfg.MaxConcurrent),
+		connectionFree:      make(chan struct{}),
+		connectionWait:      sync.WaitGroup{},
+		connectionWorkers:   0,
+		connectionEnabled:   make(chan struct{}, 1),
+		connectionClosing:   nil,
+		connectionCloserLocks: make([]sync.Cond,
+			dls.TotalConcurrentConnections()),
+		lastConnectionID:  0,
+		requestRetries:    cfg.RequestRetries,
+		requestWaitTicker: requestWaitTicker,
 	}
 }
 
@@ -243,29 +246,52 @@ func (c *client) connect(
 	}:
 
 	case <-c.connectionClosing:
+		result <- connectRequestResult{
+			ID:    connectionID,
+			Error: ErrConnectionShutdownClosing,
+		}
+
 		return ErrConnectionShutdownClosing
 	}
 
 	defer func() {
-		c.connectionCloserLock.Lock()
-		defer c.connectionCloserLock.Unlock()
+		connectionCloseTryRemain := c.connectionWorkers
 
-		for cc := range c.connectionConnected {
-			if cc.ID != connectionID {
-				c.connectionConnected <- cc
+		for ccClose := range c.connectionConnected {
+			if ccClose.ID == connectionID {
+				needClose = !ccClose.Closed
 
+				break
+			}
+
+			c.connectionConnected <- ccClose
+
+			c.connectionCloserLocks[ccClose.ID].L.Lock()
+			c.connectionCloserLocks[ccClose.ID].Broadcast()
+			c.connectionCloserLocks[ccClose.ID].L.Unlock()
+
+			connectionCloseTryRemain--
+
+			if connectionCloseTryRemain > 0 {
 				continue
 			}
 
-			needClose = !cc.Closed
+			connectionCloseTryRemain = c.connectionWorkers
 
-			break
+			c.connectionCloserLocks[connectionID].L.Lock()
+			c.connectionCloserLocks[connectionID].Wait()
+			c.connectionCloserLocks[connectionID].L.Unlock()
 		}
 	}()
 
 	// Test again even when connectionConnected writing has finished
 	select {
 	case <-c.connectionClosing:
+		result <- connectRequestResult{
+			ID:    connectionID,
+			Error: ErrConnectionShutdownClosing,
+		}
+
 		return ErrConnectionShutdownClosing
 
 	case c.connectionEnabled <- struct{}{}:
@@ -318,23 +344,36 @@ func (c *client) connect(
 		vChannels.Shutdown()
 		channelized.Shutdown()
 
-		c.connectionCloserLock.Lock()
-		defer c.connectionCloserLock.Unlock()
+		channelCloseTryRemain := c.maxChannels
 
 		for ch := range c.channel {
-			if ch.ID != connectionID {
-				c.channel <- ch
+			if ch.ID == connectionID {
+				channelCreated--
 
+				if channelCreated > 0 {
+					continue
+				}
+
+				break
+			}
+
+			c.channel <- ch
+
+			c.connectionCloserLocks[ch.ID].L.Lock()
+			c.connectionCloserLocks[ch.ID].Broadcast()
+			c.connectionCloserLocks[ch.ID].L.Unlock()
+
+			channelCloseTryRemain--
+
+			if channelCloseTryRemain > 0 {
 				continue
 			}
 
-			channelCreated--
+			channelCloseTryRemain = c.maxChannels
 
-			if channelCreated > 0 {
-				continue
-			}
-
-			break
+			c.connectionCloserLocks[connectionID].L.Lock()
+			c.connectionCloserLocks[connectionID].Wait()
+			c.connectionCloserLocks[connectionID].L.Unlock()
 		}
 	}()
 
@@ -530,9 +569,14 @@ func (c *client) Serve() (transceiver.Requester, error) {
 	c.lastConnectionID = 0
 	c.totalChannels = 0
 	c.connectionClosing = make(chan struct{})
+	c.connectionWorkers = 0
 
 	for _, dialer := range c.dialers {
 		for cIdx := uint32(0); cIdx < dialer.MaxConcurrentConnections; cIdx++ {
+			c.connectionCloserLocks[c.lastConnectionID] = sync.Cond{
+				L: &sync.Mutex{},
+			}
+
 			c.connectionWait.Add(1)
 
 			go c.connection(
@@ -581,13 +625,18 @@ func (c *client) Close() error {
 	}
 
 	connectionConnected := c.connectionConnected
+	openedConnectionWorkers := c.connectionWorkers
 	remainingWorkersToClose := c.connectionWorkers
 
-	for c.connectionWorkers > 0 {
+	for openedConnectionWorkers > 0 {
 		select {
 		case cc := <-connectionConnected:
 			if cc.Closed {
 				connectionConnected <- cc
+
+				c.connectionCloserLocks[cc.ID].L.Lock()
+				c.connectionCloserLocks[cc.ID].Broadcast()
+				c.connectionCloserLocks[cc.ID].L.Unlock()
 
 				continue
 			}
@@ -596,6 +645,10 @@ func (c *client) Close() error {
 			cc.Closed = true
 
 			connectionConnected <- cc
+
+			c.connectionCloserLocks[cc.ID].L.Lock()
+			c.connectionCloserLocks[cc.ID].Broadcast()
+			c.connectionCloserLocks[cc.ID].L.Unlock()
 
 			remainingWorkersToClose--
 
@@ -608,7 +661,7 @@ func (c *client) Close() error {
 		case c.connectionConnect <- connectExitReq:
 			<-connectExitReq.Result
 
-			c.connectionWorkers--
+			openedConnectionWorkers--
 		}
 	}
 
@@ -658,6 +711,10 @@ func (c *client) Available() bool {
 	case cc := <-c.channel:
 		c.channel <- cc
 
+		c.connectionCloserLocks[cc.ID].L.Lock()
+		c.connectionCloserLocks[cc.ID].Broadcast()
+		c.connectionCloserLocks[cc.ID].L.Unlock()
+
 		return true
 
 	default:
@@ -681,10 +738,16 @@ func (c *client) request(
 
 	defer func() {
 		c.channel <- ch
+
+		c.connectionCloserLocks[ch.ID].L.Lock()
+		c.connectionCloserLocks[ch.ID].Broadcast()
+		c.connectionCloserLocks[ch.ID].L.Unlock()
 	}()
 
 	connLogger := log.Context("Connection (" +
-		strconv.FormatUint(uint64(ch.ID), 10) + ")")
+		strconv.FormatUint(uint64(ch.ID), 10) + ")",
+	).Context("Channel (" +
+		strconv.FormatUint(uint64(ch.ChannelID), 10) + ")")
 
 	meter.ConnectionFailure(nil)
 
@@ -708,11 +771,12 @@ func (c *client) request(
 	case <-ch.ConnClosed:
 		return true, true, connLogger, ErrRequestSelectedChannelIsUnavailable
 
-	default:
-	}
+	case <-c.connectionClosing:
+		return false, false, connLogger, ErrConnectionShutdownClosing
 
-	connLogger = connLogger.Context("Channel (" +
-		strconv.FormatUint(uint64(ch.ChannelID), 10) + ")")
+	case c.connectionEnabled <- struct{}{}:
+		<-c.connectionEnabled
+	}
 
 	reqTimer := meter.Request()
 
