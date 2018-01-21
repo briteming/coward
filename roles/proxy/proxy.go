@@ -23,9 +23,9 @@ package proxy
 import (
 	"time"
 
-	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/role"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/network/server"
 	"github.com/reinit/coward/roles/common/transceiver"
@@ -86,10 +86,9 @@ func (s *proxy) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 	// Start Corunner
 	runner, runnerServeErr := worker.New(s.logger, worker.Config{
 		MaxWorkers: (s.cfg.Capacity * uint32(
-			s.cfg.ConnectionChannels)) + s.cfg.Capacity,
+			s.cfg.ConnectionChannels)) * 2,
 		MinWorkers: common.AutomaticalMinWorkerCount(
-			(s.cfg.Capacity*uint32(s.cfg.ConnectionChannels))+s.cfg.Capacity,
-			128),
+			s.cfg.Capacity*uint32(s.cfg.ConnectionChannels)*2, 128),
 		MaxWorkerIdle:     s.cfg.IdleTimeout * 10,
 		JobReceiveTimeout: s.cfg.InitialTimeout,
 	}).Serve()

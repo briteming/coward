@@ -71,6 +71,10 @@ func (c *ConfigProxy) VerifyConnections() error {
 		return errors.New("Connections must be greater than 0")
 	}
 
+	if c.Connections > 8000000 {
+		return errors.New("Connections must be smaller than 8,000,000")
+	}
+
 	return nil
 }
 
@@ -238,7 +242,7 @@ type ConfigInput struct {
 	Port              uint16          `json:"port" cfg:"p,-port:Specify a port to serve the Socks5 server"`
 	Timeout           uint16          `json:"timeout" cfg:"t,-timeout:The maximum idle time in second of a Socks5 client connection.\r\n\r\nIf server consecutively receives no data from a connection during this period of time, then that connection will be considered as inactive and thus be disconnected."`
 	InitialTimeout    uint16          `json:"initial_timeout" cfg:"it,-initial-timeout:The maximum wait time in second for Socks5 clients to finish Handshake.\r\n\r\nA well balanced value is required: You need to give clients plenty of time to finish the Initial request (Otherwise they may never be able to connect), and also be able defending against malicious accesses (By time them out) at same time."`
-	Capacity          uint32          `json:"capicty" cfg:"c,-capacity:The maximum connections this Socks5 server can accept.\r\n\r\nWhen amount of connections reached this limitation, new incoming connection will be dropped."`
+	Capacity          uint32          `json:"Capacity" cfg:"c,-capacity:The maximum connections this Socks5 server can accept.\r\n\r\nWhen amount of connections reached this limitation, new incoming connection will be dropped."`
 	Account           []ConfigAccount `json:"account" cfg:"a,-accounts:Accounts of the Socks5 server.\r\n\r\nOnce defined, the Socks5 server will require user authentication before relaying the request."`
 }
 
@@ -328,10 +332,14 @@ func (c *ConfigInput) VerifyInitialTimeout() error {
 	return nil
 }
 
-// VerifyCapicty Verify Capicty
-func (c *ConfigInput) VerifyCapicty() error {
+// VerifyCapacity Verify Capacity
+func (c *ConfigInput) VerifyCapacity() error {
 	if c.Capacity <= 0 {
-		return errors.New("Capicty must be greater than 0")
+		return errors.New("Capacity must be greater than 0")
+	}
+
+	if c.Capacity > 8000000 {
+		return errors.New("Capacity must be smaller than 8,000,000")
 	}
 
 	return nil
@@ -360,7 +368,7 @@ func (c *ConfigInput) Verify() error {
 	}
 
 	if c.Capacity <= 0 {
-		return errors.New("Capicty must be specified")
+		return errors.New("Capacity must be specified")
 	}
 
 	return nil

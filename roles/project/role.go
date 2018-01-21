@@ -44,7 +44,7 @@ type ConfigProject struct {
 	Host           string        `json:"host" cfg:"h,-host:Host name of the Projection destination."`
 	Port           uint16        `json:"port" cfg:"p,-port:Port number of the Projection destination."`
 	Protocol       string        `json:"protocol" cfg:"o,-protocol:Protocol type of the Projection destination. Should be the same on the Projector server."`
-	MaxConnections uint32        `json:"connections" cfg:"c,-connections:How many connections to the Projection destination can be established at same time.\r\n\r\nNotice this value also effects how many connections will be established to the COWARD Projector server.\r\n\r\nSay if you allowing 1000 Projection connections and having 100 channels per Projector server connection, then we will create 10 connections to the Projector server."`
+	Connections    uint32        `json:"connections" cfg:"c,-connections:How many connections to the Projection destination can be established at same time.\r\n\r\nNotice this value also effects how many connections will be established to the COWARD Projector server.\r\n\r\nSay if you allowing 1000 Projection connections and having 100 channels per Projector server connection, then we will create 10 connections to the Projector server."`
 	Retry          uint8         `json:"retries" cfg:"r,-retries:How many times we will retry when we have failed to connect to the Projection destination."`
 	Timeout        uint16        `json:"timeout" cfg:"t,-timeout:The maximum wait time in second for a idle connection to the Projection destination can be maintianed.\r\n\r\nIf the connection remain idle pass this period of time, then it will be closed."`
 	RequestTimeout uint16        `json:"request_timeout" cfg:"rt,-request-timeout:The maximum wait time in second for the Projection destination to accept our connect request."`
@@ -79,10 +79,14 @@ func (c *ConfigProject) VerifyProtocol() error {
 	return nil
 }
 
-// VerifyMaxConnections Verify MaxConnections
-func (c *ConfigProject) VerifyMaxConnections() error {
-	if c.MaxConnections < 1 {
+// VerifyConnections Verify Connections
+func (c *ConfigProject) VerifyConnections() error {
+	if c.Connections < 1 {
 		return errors.New("Connections must be greater than 0")
+	}
+
+	if c.Connections > 8000000 {
+		return errors.New("Connections must be smaller than 8,000,000")
 	}
 
 	return nil
@@ -108,7 +112,7 @@ func (c *ConfigProject) VerifyTimeout() error {
 
 // VerifyRequestTimeout Verify RequestTimeout
 func (c *ConfigProject) VerifyRequestTimeout() error {
-	if c.RequestTimeout < 1 {
+	if c.RequestTimeout > c.Timeout {
 		return errors.New("Request Timeout must be greater than 0")
 	}
 
@@ -129,7 +133,7 @@ func (c *ConfigProject) Verify() error {
 		return errors.New("Port must be specified")
 	}
 
-	if c.MaxConnections <= 0 {
+	if c.Connections <= 0 {
 		return errors.New("Connections must be specified")
 	}
 
@@ -160,6 +164,7 @@ type ConfigInput struct {
 	Port           uint16           `json:"port" cfg:"p,-port:Registeration port of the remote COWARD Projector server.\r\n\r\nMust matchs the setting on server."`
 	Timeout        uint16           `json:"timeout" cfg:"t,-timeout:The maximum idle time in second of the established connection.\r\n\r\nIf a connection is consecutively idle during this period of time, then that connection will be considered as inactive and thus be disconnected.\r\n\r\nIt is recommended to set this value no greater than the related one on the COWARD Projector server setting."`
 	RequestTimeout uint16           `json:"request_timeout" cfg:"rt,-request-timeout:The maximum wait time in second for the server to respond the Initial request of a client.\r\n\r\nIf the COWARD Projector server has failed to respond the Initial request within this period of time, the connection will be considered broken and thus be closed.\r\n\r\nIt is recommended to set this value slightly greater than the \"--initial-timeout\" setting on the COWARD Projector server."`
+	PingTimeout    uint16           `json:"ping_timeout" cfg:"pt,-ping-timeout:The maximum delay between pings in second.\r\n\r\nWe normally will automatically negotiate the ping delay during registeration, but sometime that negoitated delay maybe too long for actal use.\r\n\r\nWhen that happens, you can overwrite that negoitated delay by set a smaller value use this option."`
 	Channels       uint8            `json:"channels" cfg:"n,-channels:How many requests can be simultaneously opened on a single established connection.\r\n\r\nSet the value greater than 1 so a single connection can be use to transport multiple requests (Multiplexing).\r\n\r\nWARNING:\r\nThis value must matchs or smaller than the related setting on the COWARD Projector server, otherwise the request will be come malformed and thus dropped."`
 	Persistent     bool             `json:"persist" cfg:"k,-persist:Whether or not to keep the connection to the COWARD Projector active after all requests on the connection is completed."`
 	Projects       []*ConfigProject `json:"projects" cfg:"s,-projects:Pre-defined project destnations.\r\n\r\nMust be exist on the COWARD Projector server."`
@@ -287,6 +292,10 @@ func (c *ConfigInput) Verify() error {
 		}
 	}
 
+	if c.PingTimeout <= 0 {
+		c.PingTimeout = c.Timeout
+	}
+
 	if c.Channels <= 0 {
 		return errors.New("Channels must be defined")
 	}
@@ -324,6 +333,7 @@ func Role() role.Registration {
 				Port:           0,
 				Timeout:        0,
 				RequestTimeout: 0,
+				PingTimeout:    0,
 				Channels:       0,
 				Persistent:     false,
 				Projects:       []*ConfigProject{},
@@ -353,7 +363,7 @@ func Role() role.Registration {
 					Host:           cfg.Projects[mIdx].Host,
 					Port:           cfg.Projects[mIdx].Port,
 					Protocol:       cfg.Projects[mIdx].selectedProto,
-					MaxConnections: cfg.Projects[mIdx].MaxConnections,
+					MaxConnections: cfg.Projects[mIdx].Connections,
 					Retry:          cfg.Projects[mIdx].Retry,
 					Timeout: time.Duration(
 						cfg.Projects[mIdx].Timeout) * time.Second,
@@ -371,6 +381,8 @@ func Role() role.Registration {
 						cfg.Timeout) * time.Second,
 					TransceiverInitialTimeout: time.Duration(
 						cfg.RequestTimeout) * time.Second,
+					TransceiverPingTimeout: time.Duration(
+						cfg.PingTimeout) * time.Second,
 					TransceiverChannels:             cfg.Channels,
 					TransceiverConnectionPersistent: cfg.Persistent,
 					Endpoints:                       endpoints,

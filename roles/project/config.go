@@ -44,6 +44,7 @@ func (p Endpoints) TotalConnections() uint32 {
 type Config struct {
 	TransceiverIdleTimeout          time.Duration
 	TransceiverInitialTimeout       time.Duration
+	TransceiverPingTimeout          time.Duration
 	TransceiverChannels             uint8
 	TransceiverConnectionPersistent bool
 	Endpoints                       Endpoints

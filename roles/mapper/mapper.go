@@ -26,9 +26,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/role"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 	tcpconn "github.com/reinit/coward/roles/common/network/connection/tcp"
 	udpconn "github.com/reinit/coward/roles/common/network/connection/udp"
@@ -116,9 +116,9 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 
 	// Init runners
 	runner, runnerServeErr := worker.New(s.log, worker.Config{
-		MaxWorkers: trServe.Channels() + s.cfg.Mapping.TotalCapacity(),
+		MaxWorkers: s.cfg.Mapping.TotalCapacity() * 2,
 		MinWorkers: pcommon.AutomaticalMinWorkerCount(
-			trServe.Channels()+s.cfg.Mapping.TotalCapacity(), 128),
+			s.cfg.Mapping.TotalCapacity()*2, 128),
 		MaxWorkerIdle:     s.cfg.TransceiverIdleTimeout * 10,
 		JobReceiveTimeout: s.cfg.TransceiverInitialTimeout,
 	}).Serve()

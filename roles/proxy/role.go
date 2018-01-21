@@ -174,7 +174,11 @@ func (c *ConfigInput) VerifyInitialTimeout() error {
 // VerifyCapacity Verify Capacity
 func (c *ConfigInput) VerifyCapacity() error {
 	if c.Capacity < 1 {
-		return errors.New("Capicty must be greater than 0")
+		return errors.New("Capacity must be greater than 0")
+	}
+
+	if c.Capacity > 8000000 {
+		return errors.New("Capacity must be smaller than 8,000,000")
 	}
 
 	return nil
@@ -248,7 +252,7 @@ func (c *ConfigInput) Verify() error {
 	}
 
 	if c.Capacity <= 0 {
-		return errors.New("Capicty must be specified")
+		return errors.New("Capacity must be specified")
 	}
 
 	if c.Channels <= 0 {

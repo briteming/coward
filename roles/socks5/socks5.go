@@ -85,16 +85,10 @@ func (s *socks5) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 	s.transceiver = trServes
 
 	// Start Corunner
-	vChannels := uint32(0)
-
-	trServes.Clients(func(cID transceiver.ClientID, r transceiver.Requester) {
-		vChannels += r.Channels()
-	})
-
 	runner, runnerServeErr := worker.New(s.log, worker.Config{
-		MaxWorkers: vChannels + s.cfg.Capacity,
+		MaxWorkers: s.cfg.Capacity * 2,
 		MinWorkers: pcommon.AutomaticalMinWorkerCount(
-			vChannels+s.cfg.Capacity, 128),
+			s.cfg.Capacity*2, 128),
 		MaxWorkerIdle:     s.cfg.ConnectionTimeout * 10,
 		JobReceiveTimeout: s.cfg.NegotiationTimeout,
 	}).Serve()

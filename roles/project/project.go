@@ -96,9 +96,9 @@ func (s *projectile) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 
 	// Start Corunner
 	runner, runnerServeErr := worker.New(s.logger, worker.Config{
-		MaxWorkers: s.cfg.Endpoints.TotalConnections(),
+		MaxWorkers: s.cfg.Endpoints.TotalConnections() * 2,
 		MinWorkers: pcommon.AutomaticalMinWorkerCount(
-			s.cfg.Endpoints.TotalConnections(), 128),
+			s.cfg.Endpoints.TotalConnections()*2, 128),
 		MaxWorkerIdle:     s.cfg.TransceiverIdleTimeout * 10,
 		JobReceiveTimeout: s.cfg.TransceiverInitialTimeout,
 	}).Serve()
@@ -162,6 +162,13 @@ func (s *projectile) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		}
 	}
 
+	pingTimeout := s.cfg.TransceiverIdleTimeout / 2
+
+	if s.cfg.TransceiverPingTimeout > 0 &&
+		pingTimeout > s.cfg.TransceiverPingTimeout {
+		pingTimeout = s.cfg.TransceiverPingTimeout
+	}
+
 	pProjects, pProjectErr := project.New(
 		s.logger,
 		s.transceiver,
@@ -170,7 +177,7 @@ func (s *projectile) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		pRegisterations,
 		project.Config{
 			MaxConnections: trConnections,
-			PingTickDelay:  s.cfg.TransceiverIdleTimeout / 2,
+			PingTickDelay:  pingTimeout,
 		})
 
 	if pProjectErr != nil {

@@ -78,6 +78,10 @@ func (c *ConfigMapping) VerifyCapacity() error {
 		return errors.New("Capacity must be greater than 0")
 	}
 
+	if c.Capacity > 8000000 {
+		return errors.New("Capacity must be smaller than 8,000,000")
+	}
+
 	return nil
 }
 
@@ -171,6 +175,19 @@ func (c ConfigInput) GetDescription(fieldPath string) string {
 func (c *ConfigInput) VerifyPort() error {
 	if c.Port <= 0 {
 		return errors.New("Port must be greater than 0")
+	}
+
+	return nil
+}
+
+// VerifyConnections Verify Connections
+func (c *ConfigInput) VerifyConnections() error {
+	if c.Connections <= 0 {
+		return errors.New("Connections must be defined")
+	}
+
+	if c.Connections > 8000000 {
+		return errors.New("Connections must be smaller than 8,000,000")
 	}
 
 	return nil

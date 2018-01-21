@@ -103,7 +103,7 @@ func (s *projector) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 
 	// Start Corunner
 	startWorkers := s.cfg.GetTotalServerCapacity() +
-		(s.cfg.Capacity * uint32(s.cfg.ConnectionChannels) * 2)
+		((s.cfg.Capacity * uint32(s.cfg.ConnectionChannels)) * 2)
 
 	runner, runnerServeErr := worker.New(s.logger, worker.Config{
 		MaxWorkers:        startWorkers,
