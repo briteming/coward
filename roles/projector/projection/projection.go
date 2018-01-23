@@ -25,6 +25,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/roles/common/network"
 )
 
@@ -51,18 +52,18 @@ type Projection interface {
 
 // projection implements Projection
 type projection struct {
-	id                 ID
-	receivers          receivers
-	receiveTimeoutTick <-chan time.Time
-	requestTimeout     time.Duration
-	requestRetries     uint8
+	id             ID
+	receivers      receivers
+	ticker         ticker.Requester
+	requestTimeout time.Duration
+	requestRetries uint8
 }
 
 // request select a receiver and request relay from a Projection
 func (p *projection) request(
 	cancel <-chan struct{},
-	timeout time.Time,
-	req func(r *receiver) (bool, error),
+	expWaiter ticker.Wait,
+	req func(r *receiver, expWaiter ticker.Wait) (bool, error),
 ) (bool, error) {
 	var selectedReceiver *receiver
 
@@ -74,13 +75,7 @@ func (p *projection) request(
 		case <-cancel:
 			return false, io.EOF
 
-		case <-p.receiveTimeoutTick: // Timeout tick
-			now := time.Now()
-
-			if now.Before(timeout) {
-				continue
-			}
-
+		case <-expWaiter: // Timeout tick
 			return false, ErrReceiveNoReceiverAvailable
 		}
 
@@ -127,14 +122,14 @@ func (p *projection) request(
 		p.receivers.Capacitor.Broadcast()
 	}()
 
-	return req(selectedReceiver)
+	return req(selectedReceiver, expWaiter)
 }
 
 // receive sends request to a receiver and execute the request
 func (p *projection) receive(
 	cancel <-chan struct{},
-	timeout time.Time,
-	req func(r *receiver) (chan struct{}, bool, error),
+	expWaiter ticker.Wait,
+	req func(r *receiver, exp ticker.Wait) (chan struct{}, bool, error),
 ) error {
 	var retryWaiter chan struct{}
 	var lastErr error
@@ -142,21 +137,22 @@ func (p *projection) receive(
 	for retried := uint8(0); retried < p.requestRetries; retried++ {
 		retryWaiter = nil
 
-		eR, eE := p.request(cancel, timeout, func(r *receiver) (bool, error) {
-			reqRetryWaiter, reqRetry, reqErr := req(r)
+		eR, eE := p.request(
+			cancel, expWaiter, func(r *receiver, e ticker.Wait) (bool, error) {
+				reqRetryWaiter, reqRetry, reqErr := req(r, e)
 
-			if reqErr == nil {
-				return false, nil
-			}
+				if reqErr == nil {
+					return false, nil
+				}
 
-			if !reqRetry {
-				return false, reqErr
-			}
+				if !reqRetry {
+					return false, reqErr
+				}
 
-			retryWaiter = reqRetryWaiter
+				retryWaiter = reqRetryWaiter
 
-			return true, reqErr
-		})
+				return true, reqErr
+			})
 
 		if retryWaiter != nil {
 			<-retryWaiter
@@ -204,75 +200,67 @@ func (p *projection) Receive(c network.Connection) error {
 		}
 	}()
 
-	return p.receive(
-		c.Closed(), exp, func(r *receiver) (chan struct{}, bool, error) {
-			for {
+	receiveWait, receiveWaitErr := p.ticker.Request(exp)
+
+	if receiveWaitErr != nil {
+		return receiveWaitErr
+	}
+
+	defer receiveWait.Close()
+
+	return p.receive(c.Closed(), receiveWait.Wait(),
+		func(r *receiver, exp ticker.Wait) (chan struct{}, bool, error) {
+			select {
+			case r.accessorChan <- acc:
+				proccessor := <-acc.proccessor
+
 				select {
-				case r.accessorChan <- acc:
-					proccessor := <-acc.proccessor
+				case calling := <-runn.callReceive:
+					calling.Result <- calling.Job(calling.Logger)
 
-					for {
-						select {
-						case calling := <-runn.callReceive:
-							calling.Result <- calling.Job(calling.Logger)
+					result := <-acc.result
 
-							result := <-acc.result
-
-							// If request been relayed, don't retry regardless
-							// whether or not we have failed.
-							if result.err == nil {
-								return result.wait, false, nil
-							}
-
-							return result.wait, false, result.err
-
-						case result := <-acc.result:
-							if result.err == nil {
-								return result.wait, false, nil
-							}
-
-							if result.resetProccessor {
-								proccessor.Proccessor.Close()
-
-								return proccessor.Waiter,
-									result.retriable, result.err
-							}
-
-							return result.wait, result.retriable, result.err
-
-						case <-p.receiveTimeoutTick:
-							now := time.Now()
-
-							if now.Before(exp) {
-								continue
-							}
-
-							// Close Proccessor, it should disconnect the
-							// Proccessor from Projector, after that, we can
-							// try the next client or tell client that we have
-							// failed.
-							proccessor.Proccessor.Close()
-
-							// Ditch the result
-							<-acc.result
-
-							return proccessor.Waiter, true,
-								ErrProccessorExecutionTimedout
-						}
+					// If request been relayed, don't retry regardless
+					// whether or not we have failed.
+					if result.err == nil {
+						return result.wait, false, nil
 					}
 
-				case <-c.Closed():
-					return nil, false, ErrAccessorClosedBeforeRequestReceive
+					return result.wait, false, result.err
 
-				case <-p.receiveTimeoutTick:
-					now := time.Now()
-
-					if now.Before(exp) {
-						continue
+				case result := <-acc.result:
+					if result.err == nil {
+						return result.wait, false, nil
 					}
 
-					return nil, false, ErrReceiveTimedout
+					if result.resetProccessor {
+						proccessor.Proccessor.Close()
+
+						return proccessor.Waiter,
+							result.retriable, result.err
+					}
+
+					return result.wait, result.retriable, result.err
+
+				case <-exp:
+					// Close Proccessor, it should disconnect the
+					// Proccessor from Projector, after that, we can
+					// try the next client or tell client that we have
+					// failed.
+					proccessor.Proccessor.Close()
+
+					// Ditch the result
+					<-acc.result
+
+					return proccessor.Waiter, true,
+						ErrProccessorExecutionTimedout
 				}
+
+			case <-c.Closed():
+				return nil, false, ErrAccessorClosedBeforeRequestReceive
+
+			case <-exp:
+				return nil, false, ErrReceiveTimedout
 			}
 		})
 }

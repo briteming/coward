@@ -33,8 +33,9 @@ import (
 	"github.com/reinit/coward/roles/proxy/common"
 )
 
+// Consts
 const (
-	timeoutCheckTick = 300 * time.Millisecond
+	tickDelay = 300 * time.Millisecond
 )
 
 type proxy struct {
@@ -45,7 +46,6 @@ type proxy struct {
 	mapping         common.Mapping
 	serving         network.Serving
 	runner          worker.Runner
-	timeoutTicker   *time.Ticker
 	unspawnNotifier role.UnspawnNotifier
 }
 
@@ -66,7 +66,6 @@ func New(
 		mapping:         common.Mapping{},
 		serving:         nil,
 		runner:          nil,
-		timeoutTicker:   nil,
 		unspawnNotifier: nil,
 	}
 }
@@ -99,19 +98,13 @@ func (s *proxy) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 
 	s.runner = runner
 
-	s.timeoutTicker = time.NewTicker(timeoutCheckTick)
-
 	server, serveErr := server.New(s.listener, handler{
-		transceiver: tserver.New(
-			s.codec,
-			s.timeoutTicker.C,
-			tserver.Config{
-				InitialTimeout:       s.cfg.InitialTimeout,
-				IdleTimeout:          s.cfg.IdleTimeout,
-				ConnectionChannels:   s.cfg.ConnectionChannels,
-				ChannelDispatchDelay: s.cfg.ChannelDispatchDelay,
-			},
-		),
+		transceiver: tserver.New(s.codec, nil, tserver.Config{
+			InitialTimeout:       s.cfg.InitialTimeout,
+			IdleTimeout:          s.cfg.IdleTimeout,
+			ConnectionChannels:   s.cfg.ConnectionChannels,
+			ChannelDispatchDelay: s.cfg.ChannelDispatchDelay,
+		}),
 		runner:  s.runner,
 		mapping: s.mapping,
 		cfg:     s.cfg,
@@ -135,11 +128,6 @@ func (s *proxy) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 
 func (s *proxy) Unspawn() error {
 	s.logger.Infof("Closing")
-
-	if s.timeoutTicker != nil {
-		s.timeoutTicker.Stop()
-		s.timeoutTicker = nil
-	}
 
 	if s.serving != nil {
 		closeErr := s.serving.Close()

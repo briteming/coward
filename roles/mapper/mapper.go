@@ -28,6 +28,7 @@ import (
 
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/role"
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 	tcpconn "github.com/reinit/coward/roles/common/network/connection/tcp"
@@ -41,6 +42,11 @@ import (
 	pcommon "github.com/reinit/coward/roles/proxy/common"
 )
 
+// Consts
+const (
+	tickDelay = 300 * time.Millisecond
+)
+
 // Errors
 var (
 	ErrNoTargetForMapping = errors.New(
@@ -50,20 +56,16 @@ var (
 		"Unknow network protocol type")
 )
 
-const (
-	trReadTimeoutTickDelay = 300 * time.Millisecond
-)
-
 type mapper struct {
-	codec               transceiver.CodecBuilder
-	dialer              network.Dialer
-	log                 logger.Logger
-	cfg                 Config
-	transceiver         transceiver.Requester
-	trReadTimeoutTicker *time.Ticker
-	servers             []network.Serving
-	runner              worker.Runner
-	unspawnNotifier     role.UnspawnNotifier
+	codec           transceiver.CodecBuilder
+	dialer          network.Dialer
+	log             logger.Logger
+	cfg             Config
+	transceiver     transceiver.Requester
+	ticker          ticker.RequestCloser
+	servers         []network.Serving
+	runner          worker.Runner
+	unspawnNotifier role.UnspawnNotifier
 }
 
 // New creates a new Mapper
@@ -74,15 +76,15 @@ func New(
 	cfg Config,
 ) role.Role {
 	return &mapper{
-		codec:               codec,
-		dialer:              dialer,
-		log:                 log.Context("Mapper"),
-		cfg:                 cfg,
-		transceiver:         nil,
-		trReadTimeoutTicker: nil,
-		servers:             nil,
-		runner:              nil,
-		unspawnNotifier:     nil,
+		codec:           codec,
+		dialer:          dialer,
+		log:             log.Context("Mapper"),
+		cfg:             cfg,
+		transceiver:     nil,
+		ticker:          nil,
+		servers:         nil,
+		runner:          nil,
+		unspawnNotifier: nil,
 	}
 }
 
@@ -93,11 +95,17 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		return ErrNoTargetForMapping
 	}
 
-	s.trReadTimeoutTicker = time.NewTicker(trReadTimeoutTickDelay)
+	tticker, ttickerErr := ticker.New(tickDelay, 1024).Serve()
+
+	if ttickerErr != nil {
+		return ttickerErr
+	}
+
+	s.ticker = tticker
 
 	// Open transceiver client first
 	trServe, trServeErr := tclient.New(
-		0, s.log, s.dialer, s.codec, s.trReadTimeoutTicker.C, tclient.Config{
+		0, s.log, s.dialer, s.codec, s.ticker, tclient.Config{
 			MaxConcurrent:        s.cfg.TransceiverMaxConnections,
 			RequestRetries:       s.cfg.TransceiverRequestRetries,
 			IdleTimeout:          s.cfg.TransceiverIdleTimeout,
@@ -146,7 +154,6 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 			serving, serveErr = server.New(tcplistener.New(
 				s.cfg.Mapping[mIdx].Interface,
 				s.cfg.Mapping[mIdx].Port,
-				s.cfg.TransceiverInitialTimeout,
 				tcpconn.Wrap,
 			), tcpHandler{
 				mapper:      s.cfg.Mapping[mIdx].ID,
@@ -154,6 +161,7 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 				shb:         shb,
 				transceiver: s.transceiver,
 				timeout:     s.cfg.TransceiverIdleTimeout,
+				reqTimeout:  s.cfg.TransceiverInitialTimeout,
 			}, s.log.Context(strconv.FormatUint(
 				uint64(s.cfg.Mapping[mIdx].ID), 10)+" ("+
 				s.cfg.Mapping[mIdx].Protocol.String()+" "+
@@ -172,6 +180,7 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 				s.cfg.TransceiverIdleTimeout,
 				s.cfg.Mapping[mIdx].Capacity,
 				make([]byte, 4096),
+				s.ticker,
 				udpconn.Wrap,
 			), udpHandler{
 				mapper:      s.cfg.Mapping[mIdx].ID,
@@ -179,6 +188,7 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 				shb:         shb,
 				transceiver: s.transceiver,
 				timeout:     s.cfg.TransceiverIdleTimeout,
+				reqTimeout:  s.cfg.TransceiverInitialTimeout,
 			}, s.log.Context(strconv.FormatUint(
 				uint64(s.cfg.Mapping[mIdx].ID), 10)+" ("+
 				s.cfg.Mapping[mIdx].Protocol.String()+" "+
@@ -231,11 +241,6 @@ func (s *mapper) Unspawn() error {
 		}
 	}
 
-	if s.trReadTimeoutTicker == nil {
-		s.trReadTimeoutTicker.Stop()
-		s.trReadTimeoutTicker = nil
-	}
-
 	// Then, close all servers
 	for sIdx := range s.servers {
 		if s.servers[sIdx] == nil {
@@ -244,6 +249,12 @@ func (s *mapper) Unspawn() error {
 
 		s.servers[sIdx].Close()
 		s.servers[sIdx] = nil
+	}
+
+	// Ticker down
+	if s.ticker == nil {
+		s.ticker.Close()
+		s.ticker = nil
 	}
 
 	// Close runner at last

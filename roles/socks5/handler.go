@@ -24,9 +24,9 @@ import (
 	"time"
 
 	"github.com/reinit/coward/common/fsm"
-	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/transceiver"
 	"github.com/reinit/coward/roles/socks5/common"
@@ -73,8 +73,18 @@ func (d handler) New(
 }
 
 func (d client) Serve() error {
+	var reqErr error
+
 	d.logger.Infof("Serving")
-	defer d.logger.Infof("Closed")
+	defer func() {
+		if reqErr == nil {
+			d.logger.Infof("Request completed")
+
+			return
+		}
+
+		d.logger.Warningf("Request has failed: %s", reqErr)
+	}()
 
 	// Init negotiator
 	nego := &negotiator{
@@ -92,22 +102,22 @@ func (d client) Serve() error {
 	// Give it a shorter timeout first
 	d.conn.SetTimeout(d.negoTimeout)
 
-	bootErr := negoFSM.Bootup()
+	reqErr = negoFSM.Bootup()
 
-	if bootErr != nil {
-		d.logger.Warningf("Failed to start negotiation due to error: %s",
-			bootErr)
+	if reqErr != nil {
+		d.logger.Warningf("Failed to initialize negotiation due to error: %s",
+			reqErr)
 
-		return bootErr
+		return reqErr
 	}
 
 	for {
-		tErr := negoFSM.Tick()
+		reqErr = negoFSM.Tick()
 
-		if tErr != nil {
-			d.logger.Warningf("Negotiation has failed due to error: %s", tErr)
+		if reqErr != nil {
+			d.logger.Warningf("Negotiation has failed due to error: %s", reqErr)
 
-			return tErr
+			return reqErr
 		}
 
 		if negoFSM.Running() {
@@ -117,24 +127,24 @@ func (d client) Serve() error {
 		break
 	}
 
-	destName, req, reqBuildErr := nego.Build()
+	var destName transceiver.Destination
+	var req transceiver.BalancedRequestBuilder
 
-	if reqBuildErr != nil {
-		d.logger.Warningf("Failed to build request due to error: %s",
-			reqBuildErr)
+	destName, req, reqErr = nego.Build()
 
-		return reqBuildErr
+	if reqErr != nil {
+		d.logger.Warningf("Failed to build request due to error: %s", reqErr)
+
+		return reqErr
 	}
 
 	// Change to a longer timeout
 	d.conn.SetTimeout(d.timeout)
 
-	reqErr := d.transceiver.Request(
-		d.logger, destName, req, d.conn.Closed())
+	reqErr = d.transceiver.Request(d.logger, destName, req, d.conn.Closed())
 
 	switch reqErr {
 	case nil:
-		d.logger.Debugf("Request completed")
 		return nil
 
 	case request.ErrConnectInvalidAddressType:
@@ -169,8 +179,6 @@ func (d client) Serve() error {
 		rw.WriteFull(d.conn, []byte{
 			0x05, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
 	}
-
-	d.logger.Warningf("Request has failed: %s", reqErr)
 
 	return reqErr
 }

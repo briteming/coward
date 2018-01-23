@@ -136,12 +136,14 @@ func (d *destinations) Request(
 				log, func(
 					connectionID transceiver.ConnectionID,
 					server rw.ReadWriteDepleteDoner,
+					connCtl transceiver.ConnectionControl,
 					log logger.Logger,
 				) fsm.Machine {
 					return req(
 						destPriorities[dIdx].requester.ID(),
 						connectionID,
 						server,
+						connCtl,
 						log)
 				}, cancel, m)
 

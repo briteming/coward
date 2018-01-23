@@ -24,8 +24,8 @@ import (
 	"errors"
 	"math"
 	"sync"
-	"time"
 
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 )
@@ -64,7 +64,7 @@ type projections struct {
 // New creates a new Projections
 func New(
 	runner worker.Runner,
-	reqReceiveTick <-chan time.Time,
+	tk ticker.Requester,
 	cfg Config,
 ) Projections {
 	p := &projections{
@@ -82,9 +82,9 @@ func New(
 				Capcity:   make(chan struct{}, cfg.MaxReceivers),
 				Capacitor: sync.Cond{L: &sync.Mutex{}},
 			},
-			receiveTimeoutTick: reqReceiveTick,
-			requestTimeout:     cfg.RequestTimeout,
-			requestRetries:     cfg.Projects[pIdx].Retries,
+			ticker:         tk,
+			requestTimeout: cfg.RequestTimeout,
+			requestRetries: cfg.Projects[pIdx].Retries,
 		}
 	}
 

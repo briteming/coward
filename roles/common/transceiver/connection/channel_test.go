@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/reinit/coward/common/fsm"
+	"github.com/reinit/coward/common/ticker"
 	ch "github.com/reinit/coward/roles/common/channel"
 	"github.com/reinit/coward/roles/common/network"
 )
@@ -124,7 +125,20 @@ func TestChannelReadWrite(t *testing.T) {
 	testData := bytes.Repeat(
 		[]byte("Hello World"), (math.MaxUint16+3*expectedSegments)/11)
 
-	v := Channelize(d, 10*time.Second, nil)
+	requestWaitTicker, requestWaitErr := ticker.New(
+		300*time.Millisecond, 1024).Serve()
+
+	if requestWaitErr != nil {
+		t.Error("Failed to startup Ticker:", requestWaitErr)
+
+		return
+	}
+
+	defer requestWaitTicker.Close()
+
+	v := Channelize(d, requestWaitTicker)
+	v.Timeout(10 * time.Second)
+
 	defer v.Shutdown()
 
 	wLen, wErr := v.For(8).Write(testData)
@@ -319,7 +333,21 @@ func TestChannelDispatchMultipleChannels(t *testing.T) {
 		readChan:         r,
 		writeToBuf:       bytes.NewBuffer(make([]byte, 0, 1024)),
 	}
-	v := Channelize(d, 10*time.Second, nil)
+
+	requestWaitTicker, requestWaitErr := ticker.New(
+		300*time.Millisecond, 1024).Serve()
+
+	if requestWaitErr != nil {
+		t.Error("Failed to startup Ticker:", requestWaitErr)
+
+		return
+	}
+
+	defer requestWaitTicker.Close()
+
+	v := Channelize(d, requestWaitTicker)
+	v.Timeout(10 * time.Second)
+
 	defer v.Shutdown()
 
 	resultBuf := [ch.MaxChannels][]byte{}
@@ -500,7 +528,8 @@ func BenchmarkChannelDispatchRead(b *testing.B) {
 	d := &dummyBenchmarkConnection{
 		preDefinedReadData: testData,
 	}
-	v := Channelize(d, 10*time.Second, nil)
+	v := Channelize(d, nil)
+	v.Timeout(10 * time.Second)
 	defer v.Shutdown()
 
 	vconns := [ch.MaxChannels]Virtual{}

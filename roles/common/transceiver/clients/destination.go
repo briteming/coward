@@ -30,6 +30,7 @@ import (
 type priority struct {
 	requester *requester
 	delay     timer.Timer
+	sink      bool
 }
 
 type priorities []*priority
@@ -48,11 +49,23 @@ func (p *priority) Duration() time.Duration {
 	return p.requester.Delay().Duration() + p.delay.Duration()
 }
 
+func (p *priority) Sink(sink bool) bool {
+	oldState := p.sink
+
+	p.sink = sink
+
+	return oldState
+}
+
 func (d priorities) Len() int {
 	return len(d)
 }
 
 func (d priorities) Less(i, j int) bool {
+	if d[i].sink && !d[j].sink {
+		return false
+	}
+
 	if d[i].requester.sink && !d[j].requester.sink {
 		return false
 	}

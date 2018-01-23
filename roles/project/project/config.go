@@ -26,4 +26,5 @@ import "time"
 type Config struct {
 	MaxConnections uint32
 	PingTickDelay  time.Duration
+	RequestTimeout time.Duration
 }

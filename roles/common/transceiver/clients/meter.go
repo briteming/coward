@@ -37,12 +37,14 @@ type meter struct {
 
 type meterConnectionStopper struct {
 	requesters *requesters
+	current    *requester
 	stopper    timer.Stopper
 	lock       *sync.Mutex
 }
 
 type meterRequestStopper struct {
 	dest    *destination
+	current *priority
 	stopper timer.Stopper
 	lock    *sync.Mutex
 }
@@ -53,6 +55,8 @@ func (m meterConnectionStopper) Stop() time.Duration {
 
 	// Sync the value into requester before doing anything else
 	duration := m.stopper.Stop()
+
+	m.current.Sink(false)
 
 	m.requesters.Renew()
 
@@ -65,6 +69,8 @@ func (m meterRequestStopper) Stop() time.Duration {
 
 	// Sync the value into destination record before doing anything else
 	duration := m.stopper.Stop()
+
+	m.current.Sink(false)
 
 	// Don't resort if somebody is requesting
 	if atomic.LoadUint32(&m.dest.RunningRequests) > 1 {
@@ -79,6 +85,7 @@ func (m meterRequestStopper) Stop() time.Duration {
 func (m *meter) Connection() timer.Stopper {
 	return meterConnectionStopper{
 		requesters: m.requesters,
+		current:    m.current.requester,
 		stopper:    m.current.requester.Delay().Start(),
 		lock:       m.lock,
 	}
@@ -88,19 +95,33 @@ func (m *meter) ConnectionFailure(e error) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	switch e {
-	case nil:
-		m.current.requester.Sink(false)
+	m.current.requester.Sink(true)
 
-	default:
-		m.current.requester.Sink(true)
+	if atomic.LoadUint32(&m.destination.RunningRequests) > 1 {
+		return
 	}
+
+	m.requesters.Renew()
 }
 
 func (m *meter) Request() timer.Stopper {
 	return meterRequestStopper{
 		dest:    m.destination,
+		current: m.current,
 		stopper: m.current.Delay().Start(),
 		lock:    m.lock,
 	}
+}
+
+func (m *meter) RequestFailure(e error) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	m.current.Sink(true)
+
+	if atomic.LoadUint32(&m.destination.RunningRequests) > 1 {
+		return
+	}
+
+	m.destination.Renew()
 }

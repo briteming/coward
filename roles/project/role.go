@@ -169,7 +169,7 @@ type ConfigInput struct {
 	Persistent     bool             `json:"persist" cfg:"k,-persist:Whether or not to keep the connection to the COWARD Projector active after all requests on the connection is completed."`
 	Projects       []*ConfigProject `json:"projects" cfg:"s,-projects:Pre-defined project destnations.\r\n\r\nMust be exist on the COWARD Projector server."`
 	Codec          string           `json:"codec" cfg:"e,-codec:Specify which Codec will be used to encode and decode data payload to and from a connection."`
-	CodecSetting   string           `json:"codec_setting" cfg:"es,-codec-cfg:Configuration of the Codec.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
+	CodecSetting   []string         `json:"codec_setting" cfg:"es,-codec-cfg:Configuration of the Codec as an array of string.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
 }
 
 // GetDescription get descriptions
@@ -267,7 +267,7 @@ func (c *ConfigInput) VerifyCodecSetting() error {
 		return errors.New("Codec must be specified")
 	}
 
-	return c.selectedCodec.Verify([]byte(c.CodecSetting))
+	return c.selectedCodec.Verify(c.CodecSetting)
 }
 
 // Verify Verifies
@@ -309,7 +309,7 @@ func (c *ConfigInput) Verify() error {
 	}
 
 	if c.selectedCodec.Verify != nil {
-		vErr := c.selectedCodec.Verify([]byte(c.CodecSetting))
+		vErr := c.selectedCodec.Verify(c.CodecSetting)
 
 		if vErr != nil {
 			return errors.New("Codec Setting was invalid: " + vErr.Error())
@@ -338,7 +338,7 @@ func Role() role.Registration {
 				Persistent:     false,
 				Projects:       []*ConfigProject{},
 				Codec:          "",
-				CodecSetting:   "",
+				CodecSetting:   nil,
 			}
 		},
 		Generater: func(
@@ -373,7 +373,7 @@ func Role() role.Registration {
 			}
 
 			return New(
-				cfg.selectedCodec.Build([]byte(cfg.CodecSetting)),
+				cfg.selectedCodec.Build(cfg.CodecSetting),
 				dialer,
 				log,
 				Config{

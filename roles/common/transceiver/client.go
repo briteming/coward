@@ -41,6 +41,11 @@ type Client interface {
 	Serve() (Requester, error)
 }
 
+// ConnectionControl expose some controls of the internal connection
+type ConnectionControl interface {
+	Demolish() error
+}
+
 // Balancer represents a Transceiver Client Balancer
 type Balancer interface {
 	Serve() (Balanced, error)
@@ -76,7 +81,11 @@ type Balanced interface {
 // RequestBuilder represents a request handler that will be used to
 // handle request between Transceiver Client and Server
 type RequestBuilder func(
-	ConnectionID, rw.ReadWriteDepleteDoner, logger.Logger) fsm.Machine
+	ConnectionID,
+	rw.ReadWriteDepleteDoner,
+	ConnectionControl,
+	logger.Logger,
+) fsm.Machine
 
 // BalancedRequestBuilder is the same as the RequestBuilder but for
 // Transceiver Client Balancer (Clients)
@@ -84,6 +93,7 @@ type BalancedRequestBuilder func(
 	ClientID,
 	ConnectionID,
 	rw.ReadWriteDepleteDoner,
+	ConnectionControl,
 	logger.Logger,
 ) fsm.Machine
 
@@ -92,4 +102,5 @@ type Meter interface {
 	Connection() timer.Stopper
 	ConnectionFailure(error)
 	Request() timer.Stopper
+	RequestFailure(error)
 }

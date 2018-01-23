@@ -31,8 +31,9 @@ import (
 
 // requestRelay builds a request relay
 type requestRelay struct {
-	client  network.Connection
-	timeout time.Duration
+	client     network.Connection
+	reqTimeout time.Duration
+	timeout    time.Duration
 }
 
 // relayClient wraps the Accessor connection
@@ -47,16 +48,14 @@ type relayClient struct {
 func (r *relayClient) Read(b []byte) (int, error) {
 	rLen, rErr := r.Connection.Read(b)
 
-	if rErr != nil || r.timeoutExpanded {
-		return rLen, rErr
+	if !r.timeoutExpanded {
+		// We only expand the timeout when the client successfully sent
+		// it's first message. Otherwise the client may aleady down without
+		// us knowing it.
+		r.Connection.SetTimeout(r.timeout)
+
+		r.timeoutExpanded = true
 	}
-
-	// We only expand the timeout when the client successfully sent
-	// it's first message. Otherwise the client may aleady down without
-	// us knowing it.
-	r.Connection.SetTimeout(r.timeout)
-
-	r.timeoutExpanded = true
 
 	return rLen, rErr
 }
@@ -69,7 +68,7 @@ func (r requestRelay) Initialize(l logger.Logger, server relay.Server) error {
 // Client returns the client
 func (r requestRelay) Client(
 	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
-	r.client.SetTimeout(r.timeout)
+	r.client.SetTimeout(r.reqTimeout)
 
 	return &relayClient{
 		Connection:      r.client,

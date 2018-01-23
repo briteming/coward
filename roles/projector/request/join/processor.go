@@ -405,8 +405,9 @@ func (p *processor) relayInit(f fsm.FSM) error {
 		p.rw,
 		p.cfg.Buffer,
 		requestRelay{
-			client:  p.currentReceivedAccessor.Access(),
-			timeout: p.cfg.ClientTimeout,
+			client:     p.currentReceivedAccessor.Access(),
+			reqTimeout: p.cfg.ClientReqTimeout,
+			timeout:    p.cfg.ClientTimeout,
 		},
 		make([]byte, 4096))
 

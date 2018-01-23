@@ -58,13 +58,14 @@ type application struct {
 	exeName   string
 	version   string
 	roles     role.Roler
+	logger    logger.Logger
 	printer   print.Print
 }
 
 const roleListFormat = "    %%%ds    %%s\r\n"
 
 // New build a new COWARD application according to Config
-func New(cfg Config) Application {
+func New(log logger.Logger, cfg Config) Application {
 	var exeName string
 	var intro string
 
@@ -189,6 +190,7 @@ func New(cfg Config) Application {
 		exeName:   exeName,
 		version:   cfg.Version,
 		roles:     rol,
+		logger:    log,
 		printer: print.New(print.Config{
 			MaxLineWidth: func() int {
 				return 80
@@ -214,17 +216,20 @@ func (c *application) Help() error {
 		helpItemSpaceLen = 2
 	}
 
-	printer.Writeln([]byte(fmt.Sprintf(
-		helpUsageSlient,
-		strings.Repeat(" ", helpItemSpaceLen))), 4, helpItemSpaceLen+11, 1)
-	printer.Writeln([]byte(fmt.Sprintf(
-		helpUsageDebug,
-		strings.Repeat(" ", helpItemSpaceLen))), 4, helpItemSpaceLen+11, 1)
+	if c.logger == nil {
+		printer.Writeln([]byte(fmt.Sprintf(
+			helpUsageSlient,
+			strings.Repeat(" ", helpItemSpaceLen))), 4, helpItemSpaceLen+11, 1)
+		printer.Writeln([]byte(fmt.Sprintf(
+			helpUsageDebug,
+			strings.Repeat(" ", helpItemSpaceLen))), 4, helpItemSpaceLen+11, 1)
+		printer.Writeln([]byte(fmt.Sprintf(
+			helpUsageLog,
+			strings.Repeat(" ", helpItemSpaceLen))), 4, helpItemSpaceLen+11, 1)
+	}
+
 	printer.Writeln([]byte(fmt.Sprintf(
 		helpUsageDaemon,
-		strings.Repeat(" ", helpItemSpaceLen))), 4, helpItemSpaceLen+11, 1)
-	printer.Writeln([]byte(fmt.Sprintf(
-		helpUsageLog,
 		strings.Repeat(" ", helpItemSpaceLen))), 4, helpItemSpaceLen+11, 1)
 	printer.Writeln([]byte(fmt.Sprintf(
 		helpUsageParam,
@@ -296,23 +301,18 @@ func (c *application) buildRunConfigFromParam(
 			continue
 		}
 
-		switch trimedParam {
-		case "-slient":
+		switch {
+		case c.logger == nil && trimedParam == "-slient":
 			fallthrough
-		case "-s":
+		case c.logger == nil && trimedParam == "-s":
 			result.Slient = true
 
-		case "-daemon":
-			fallthrough
-		case "-d":
-			result.Daemom = true
-
-		case "-debug":
+		case c.logger == nil && trimedParam == "-debug":
 			result.Debug = true
 
-		case "-log":
+		case c.logger == nil && trimedParam == "-log":
 			fallthrough
-		case "-l":
+		case c.logger == nil && trimedParam == "-l":
 			if lastIdx+1 >= paramLen {
 				return ExecuteConfig{}, 0, ErrLogFileMustBeSpecified
 			}
@@ -325,9 +325,14 @@ func (c *application) buildRunConfigFromParam(
 				return ExecuteConfig{}, 0, ErrLogFileMustBeSpecified
 			}
 
-		case "-param":
+		case c.logger == nil && trimedParam == "-daemon":
 			fallthrough
-		case "-p":
+		case c.logger == nil && trimedParam == "-d":
+			result.Daemom = true
+
+		case trimedParam == "-param":
+			fallthrough
+		case trimedParam == "-p":
 			if lastIdx+1 >= paramLen {
 				return ExecuteConfig{}, 0, ErrConfigFileMustBeSpecified
 			}
@@ -558,37 +563,57 @@ func (c *application) execute(
 	signals := make(chan os.Signal)
 	breakLoop := false
 
-	if config.LogFile == "" {
-		if config.Slient {
-			log = logger.NewDitch()
-		} else if config.Debug {
-			log = logger.NewScreen(printer)
-		} else {
-			log = logger.NewScreenNonDebug(printer)
+	if c.logger == nil {
+		switch strings.ToLower(config.LogFile) {
+		case "":
+			if config.Slient {
+				log = logger.NewDitch()
+			} else if config.Debug {
+				log = logger.NewScreen(printer)
+			} else {
+				log = logger.NewScreenNonDebug(printer)
+			}
+
+		case "stdout":
+			if config.Debug {
+				log = logger.NewWrite(rw.NewMutexedWriter(os.Stdout))
+			} else {
+				log = logger.NewWriteNonDebug(rw.NewMutexedWriter(os.Stdout))
+			}
+
+		case "stderr":
+			if config.Debug {
+				log = logger.NewWrite(rw.NewMutexedWriter(os.Stderr))
+			} else {
+				log = logger.NewWriteNonDebug(rw.NewMutexedWriter(os.Stderr))
+			}
+
+		default:
+			file, fileErr := os.Create(config.LogFile)
+
+			if fileErr != nil {
+				return fileErr
+			}
+
+			defer file.Close()
+
+			bFile := bufio.NewWriter(file)
+
+			defer bFile.Flush()
+
+			if config.Debug {
+				log = logger.NewWrite(rw.NewMutexedWriter(bFile))
+			} else {
+				log = logger.NewWriteNonDebug(rw.NewMutexedWriter(bFile))
+			}
 		}
 	} else {
-		file, fileErr := os.Create(config.LogFile)
-
-		if fileErr != nil {
-			return fileErr
-		}
-
-		defer file.Close()
-
-		bFile := bufio.NewWriter(file)
-
-		defer bFile.Flush()
-
-		if config.Debug {
-			log = logger.NewWrite(rw.NewMutexedWriter(bFile))
-		} else {
-			log = logger.NewWriteNonDebug(rw.NewMutexedWriter(bFile))
-		}
+		log = c.logger
 	}
 
 	golog.SetOutput(log)
 
-	defer golog.SetOutput(os.Stderr)
+	defer golog.SetOutput(os.Stdout)
 
 	// If we can manually shutdown the application through the Shutdown
 	// channel, then there will be no need for monitering os signals as

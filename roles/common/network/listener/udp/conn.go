@@ -26,6 +26,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/roles/common/network"
 )
 
@@ -43,7 +44,7 @@ type conn struct {
 	conn                *net.UDPConn
 	addr                *net.UDPAddr
 	clients             *clients
-	deadlineTicker      <-chan time.Time
+	deadlineTicker      ticker.Requester
 	ipPort              network.ConnectionID
 	currentReader       *rbuffer
 	readerDeliver       chan *rbuffer
@@ -61,7 +62,7 @@ func (c *conn) LocalAddr() net.Addr {
 }
 
 func (c *conn) SetDeadline(t time.Time) error {
-	c.conn.SetWriteDeadline(t)
+	c.SetWriteDeadline(t)
 	c.SetReadDeadline(t)
 
 	return nil
@@ -90,25 +91,48 @@ func (c *conn) getReader() (io.Reader, error) {
 		return c.currentReader, nil
 	}
 
+	var deadlineWait ticker.Wait
+	var deadlineWaiter ticker.Waiter
+
+	defer func() {
+		if deadlineWaiter == nil {
+			return
+		}
+
+		deadlineWaiter.Close()
+	}()
+
 	for {
-		checkTicker := c.deadlineTicker
+		if deadlineWaiter != nil {
+			deadlineWaiter.Close()
+			deadlineWaiter = nil
+		}
 
 		if !c.readDeadlineEnabled {
-			checkTicker = nil
+			deadlineWait = nil
+		} else {
+			waitReq, waitReqErr := c.deadlineTicker.Request(c.readDeadline)
+
+			if waitReqErr != nil {
+				return nil, waitReqErr
+			}
+
+			deadlineWait = waitReq.Wait()
+			deadlineWaiter = waitReq
 		}
 
 		select {
-		case <-checkTicker:
-			if time.Now().After(c.readDeadline) {
-				return nil, ErrReadTimeout
-			}
+		case <-deadlineWait:
+			return nil, ErrReadTimeout
 
 		case r, rOK := <-c.readerDeliver:
 			if !rOK {
 				return nil, io.EOF
 			}
 
-			return r, nil
+			c.currentReader = r
+
+			return c.currentReader, nil
 		}
 	}
 }

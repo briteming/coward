@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/network/connection/tcp"
 	udpdial "github.com/reinit/coward/roles/common/network/dialer/udp"
@@ -34,7 +35,16 @@ import (
 
 func TestUDPListenUpDown(t *testing.T) {
 	buf := make([]byte, 1024)
-	uu := New(net.ParseIP("127.0.0.1"), 0, 1*time.Second, 16, buf, tcp.Wrap)
+
+	tk, tkErr := ticker.New(300*time.Second, 16).Serve()
+
+	if tkErr != nil {
+		t.Error("Failed to start ticker due to error:", tkErr)
+
+		return
+	}
+
+	uu := New(net.ParseIP("127.0.0.1"), 0, 1*time.Second, 16, buf, tk, tcp.Wrap)
 
 	cc, lErr := uu.Listen()
 
@@ -55,7 +65,16 @@ func TestUDPListenUpDown(t *testing.T) {
 
 func TestUDPListen(t *testing.T) {
 	buf := make([]byte, 1024)
-	uu := New(net.ParseIP("127.0.0.1"), 0, 1*time.Second, 16, buf, tcp.Wrap)
+
+	tk, tkErr := ticker.New(300*time.Second, 16).Serve()
+
+	if tkErr != nil {
+		t.Error("Failed to start ticker due to error:", tkErr)
+
+		return
+	}
+
+	uu := New(net.ParseIP("127.0.0.1"), 0, 1*time.Second, 16, buf, tk, tcp.Wrap)
 
 	acc, lErr := uu.Listen()
 

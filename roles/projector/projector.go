@@ -29,6 +29,7 @@ import (
 
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/role"
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 	tcpconn "github.com/reinit/coward/roles/common/network/connection/tcp"
@@ -53,22 +54,21 @@ var (
 
 // Consts
 const (
-	timeoutCheckTick = 100 * time.Millisecond
+	tickDelay = 300 * time.Millisecond
 )
 
 // projector Projector
 type projector struct {
-	logger                   logger.Logger
-	codec                    transceiver.CodecBuilder
-	cfg                      Config
-	listener                 network.Listener
-	unspawnNotifier          role.UnspawnNotifier
-	runner                   worker.Runner
-	serverTimeoutTicker      *time.Ticker
-	transceiverTimeoutTicker *time.Ticker
-	tserver                  network.Serving
-	servers                  []network.Serving
-	projections              projection.Projections
+	logger          logger.Logger
+	codec           transceiver.CodecBuilder
+	cfg             Config
+	listener        network.Listener
+	unspawnNotifier role.UnspawnNotifier
+	runner          worker.Runner
+	ticker          ticker.RequestCloser
+	tserver         network.Serving
+	servers         []network.Serving
+	projections     projection.Projections
 }
 
 // New creates a new Projector
@@ -79,17 +79,16 @@ func New(
 	cfg Config,
 ) role.Role {
 	return &projector{
-		logger:                   log.Context("Projector"),
-		codec:                    codec,
-		cfg:                      cfg,
-		listener:                 listener,
-		unspawnNotifier:          nil,
-		runner:                   nil,
-		serverTimeoutTicker:      nil,
-		transceiverTimeoutTicker: nil,
-		tserver:                  nil,
-		servers:                  []network.Serving{},
-		projections:              nil,
+		logger:          log.Context("Projector"),
+		codec:           codec,
+		cfg:             cfg,
+		listener:        listener,
+		unspawnNotifier: nil,
+		runner:          nil,
+		ticker:          nil,
+		tserver:         nil,
+		servers:         []network.Serving{},
+		projections:     nil,
 	}
 }
 
@@ -116,12 +115,19 @@ func (s *projector) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		return runnerServeErr
 	}
 
+	tticker, tickerErr := ticker.New(tickDelay, 1024).Serve()
+
+	if tickerErr != nil {
+		return tickerErr
+	}
+
+	s.ticker = tticker
+
 	s.runner = runner
-	s.serverTimeoutTicker = time.NewTicker(timeoutCheckTick)
 
 	// Initialize Project manager
 	s.projections = projection.New(
-		s.runner, s.serverTimeoutTicker.C, projection.Config{
+		s.runner, s.ticker, projection.Config{
 			MaxReceivers:   s.cfg.Capacity,
 			RequestTimeout: s.cfg.InitialTimeout,
 			Projects:       s.cfg.GetAllServerRegisterations(),
@@ -147,7 +153,6 @@ func (s *projector) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 			serving, serveErr = server.New(tcplistener.New(
 				s.cfg.Servers[sIdx].Interface,
 				s.cfg.Servers[sIdx].Port,
-				s.cfg.Servers[sIdx].RequestTimeout,
 				tcpconn.Wrap,
 			), pHandler, s.logger.Context("Projection (#"+
 				strconv.FormatUint(uint64(s.cfg.Servers[sIdx].ID), 10)+" "+
@@ -167,6 +172,7 @@ func (s *projector) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 				s.cfg.Servers[sIdx].RequestTimeout,
 				s.cfg.Servers[sIdx].Capacity,
 				make([]byte, 4096),
+				s.ticker,
 				udpconn.Wrap,
 			), pHandler, s.logger.Context("Projection (#"+
 				strconv.FormatUint(uint64(s.cfg.Servers[sIdx].ID), 10)+" "+
@@ -211,16 +217,12 @@ func (s *projector) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 	}
 
 	server, serveErr := server.New(s.listener, handler{
-		transceiver: tserver.New(
-			s.codec,
-			s.serverTimeoutTicker.C,
-			tserver.Config{
-				InitialTimeout:       s.cfg.InitialTimeout,
-				IdleTimeout:          s.cfg.IdleTimeout,
-				ConnectionChannels:   s.cfg.ConnectionChannels,
-				ChannelDispatchDelay: s.cfg.ChannelDispatchDelay,
-			},
-		),
+		transceiver: tserver.New(s.codec, nil, tserver.Config{
+			InitialTimeout:       s.cfg.InitialTimeout,
+			IdleTimeout:          s.cfg.IdleTimeout,
+			ConnectionChannels:   s.cfg.ConnectionChannels,
+			ChannelDispatchDelay: s.cfg.ChannelDispatchDelay,
+		}),
 		runner:      s.runner,
 		projections: s.projections,
 		minTimeout:  uint16(minTimeout),
@@ -277,6 +279,11 @@ func (s *projector) Unspawn() error {
 		s.tserver = nil
 	}
 
+	if s.ticker != nil {
+		s.ticker.Close()
+		s.ticker = nil
+	}
+
 	if s.runner != nil {
 		closeErr := s.runner.Close()
 
@@ -286,16 +293,6 @@ func (s *projector) Unspawn() error {
 		}
 
 		s.runner = nil
-	}
-
-	if s.serverTimeoutTicker != nil {
-		s.serverTimeoutTicker.Stop()
-		s.serverTimeoutTicker = nil
-	}
-
-	if s.transceiverTimeoutTicker != nil {
-		s.transceiverTimeoutTicker.Stop()
-		s.transceiverTimeoutTicker = nil
 	}
 
 	s.logger.Infof("Server is closed")

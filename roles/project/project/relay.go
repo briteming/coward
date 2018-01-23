@@ -33,7 +33,7 @@ import (
 type relaying struct {
 	dial       network.Dial
 	projection Endpoint
-	client     io.ReadWriteCloser
+	client     network.Connection
 }
 
 func (h *relaying) Initialize(l logger.Logger, server relay.Server) error {
@@ -71,5 +71,8 @@ func (h *relaying) Initialize(l logger.Logger, server relay.Server) error {
 
 func (h *relaying) Client(
 	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
+	// This is "Server" (endpoint) -side of relay, no need to set
+	// req timeout as the req connection will be shutdown once the
+	// accessor goes away
 	return h.client, nil
 }

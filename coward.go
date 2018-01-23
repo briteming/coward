@@ -35,7 +35,7 @@ import (
 func main() {
 	var execErr error
 
-	app := application.New(application.Config{
+	app := application.New(nil, application.Config{
 		Banner:    "",
 		Name:      "",
 		Version:   "",
@@ -44,9 +44,11 @@ func main() {
 		Components: application.Components{
 			proxy.Role, socks5.Role, mapper.Role,
 			projector.Role, project.Role,
-			codec.Plain,
-			codec.AESCFB128, codec.AESCFB256,
-			codec.AESGCM128, codec.AESGCM256,
+			codec.Plain, codec.PlainQoS,
+			codec.AESCFB128, codec.AESCFB128QoS,
+			codec.AESCFB256, codec.AESCFB256QoS,
+			codec.AESGCM128, codec.AESGCM128QoS,
+			codec.AESGCM256, codec.AESGCM256QoS,
 		},
 	})
 

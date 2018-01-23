@@ -26,6 +26,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/roles/common/network"
 )
 
@@ -38,7 +39,7 @@ var (
 type acceptor struct {
 	listener          *net.UDPConn
 	timeout           time.Duration
-	deadlineTick      *time.Ticker
+	deadlineTick      ticker.Requester
 	maxSize           uint32
 	buffer            []byte
 	connectionWrapper network.ConnectionWrapper
@@ -90,24 +91,16 @@ func (a *acceptor) Accept() (network.Connection, error) {
 				<-a.rbufferCompleted
 			}
 		}, func() *conn {
-			readDeadline := time.Time{}
-			readDeadlineEnabled := false
-
-			if a.timeout > 0 {
-				readDeadline = time.Now().Add(a.timeout)
-				readDeadlineEnabled = true
-			}
-
 			newConn := &conn{
 				conn:                a.listener,
 				addr:                rAddr,
 				clients:             &a.clients,
-				deadlineTicker:      a.deadlineTick.C,
+				deadlineTicker:      a.deadlineTick,
 				ipPort:              ipPort,
 				currentReader:       nil,
 				readerDeliver:       make(chan *rbuffer, 1),
-				readDeadline:        readDeadline,
-				readDeadlineEnabled: readDeadlineEnabled,
+				readDeadline:        time.Time{},
+				readDeadlineEnabled: false,
 				closed:              false,
 			}
 
@@ -138,8 +131,6 @@ func (a *acceptor) Close() error {
 	a.clients.Clear(func(cc *conn) {
 		cc.Kick()
 	})
-
-	a.deadlineTick.Stop()
 
 	return nil
 }

@@ -25,6 +25,7 @@ import (
 
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/role"
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/network/server"
@@ -38,20 +39,20 @@ import (
 type Authenticator func(username, password string) error
 
 type socks5 struct {
-	clients                      transceiver.Balancer
-	listener                     network.Listener
-	log                          logger.Logger
-	cfg                          Config
-	transceiver                  transceiver.Balanced
-	transceiverReadTimeoutTicker *time.Ticker
-	serverServing                network.Serving
-	runner                       worker.Runner
-	unspawnNotifier              role.UnspawnNotifier
+	clients         transceiver.Balancer
+	listener        network.Listener
+	log             logger.Logger
+	cfg             Config
+	transceiver     transceiver.Balanced
+	ticker          ticker.RequestCloser
+	serverServing   network.Serving
+	runner          worker.Runner
+	unspawnNotifier role.UnspawnNotifier
 }
 
 // New creates a new Socks5 server
 func New(
-	transceiverReadTimeoutTicker *time.Ticker,
+	ticker ticker.RequestCloser,
 	cs []transceiver.Client,
 	listener network.Listener,
 	log logger.Logger,
@@ -63,6 +64,7 @@ func New(
 		log:             log.Context("Socks5"),
 		cfg:             cfg,
 		transceiver:     nil,
+		ticker:          ticker,
 		serverServing:   nil,
 		runner:          nil,
 		unspawnNotifier: nil,
@@ -173,9 +175,9 @@ func (s *socks5) Unspawn() error {
 		s.serverServing = nil
 	}
 
-	if s.transceiverReadTimeoutTicker != nil {
-		s.transceiverReadTimeoutTicker.Stop()
-		s.transceiverReadTimeoutTicker = nil
+	if s.ticker != nil {
+		s.ticker.Close()
+		s.ticker = nil
 	}
 
 	if s.runner != nil {

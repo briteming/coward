@@ -27,8 +27,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/ticker"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/transceiver"
 	"github.com/reinit/coward/roles/projector/projection"
@@ -88,7 +89,7 @@ func New(
 	log logger.Logger,
 	tClient transceiver.Requester,
 	runner worker.Runner,
-	periodTicker <-chan time.Time,
+	ticker ticker.Requester,
 	registerations []Registeration,
 	cfg Config,
 ) (Projects, error) {
@@ -96,9 +97,8 @@ func New(
 		logger:   log.Context("Project"),
 		projects: make([]registered, len(registerations)),
 		connections: &connections{
-			connections: make(
-				map[transceiver.ConnectionID]connection, cfg.MaxConnections),
-			periodTicker: periodTicker,
+			connections: make(map[transceiver.ConnectionID]connection,
+				cfg.MaxConnections),
 		},
 		bootLock:    sync.Mutex{},
 		closeSignal: make(chan struct{}, 1),
@@ -111,15 +111,16 @@ func New(
 	for rrIdx := range registerations {
 		prjs.projects[projsIdx] = registered{
 			Project: project{
-				endpoint:        registerations[rrIdx].Endpoint,
-				dialer:          registerations[rrIdx].Dialer,
-				minWorkers:      registerations[rrIdx].MinWorkers,
-				pingTickTimeout: cfg.PingTickDelay,
-				runner:          runner,
-				connections:     prjs.connections,
-				lastWorkID:      0,
-				startedWorkers:  0,
-				idleWorkers:     0,
+				endpoint:           registerations[rrIdx].Endpoint,
+				dialer:             registerations[rrIdx].Dialer,
+				minWorkers:         registerations[rrIdx].MinWorkers,
+				pingTickTimeout:    cfg.PingTickDelay,
+				connRequestTimeout: cfg.RequestTimeout,
+				runner:             runner,
+				connections:        prjs.connections,
+				lastWorkID:         0,
+				startedWorkers:     0,
+				idleWorkers:        0,
 				logger: prjs.logger.Context("Projection " +
 					"(#" + strconv.FormatUint(
 					uint64(registerations[rrIdx].Endpoint.ID), 10) + " " +
@@ -131,6 +132,7 @@ func New(
 					strconv.FormatUint(uint64(
 						registerations[rrIdx].Endpoint.Port), 10))),
 				transceiver: tClient,
+				ticker:      ticker,
 				closeSignal: prjs.closeSignal,
 				closeWait:   &prjs.closeWait,
 				closing:     false,

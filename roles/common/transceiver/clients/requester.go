@@ -39,8 +39,12 @@ type requesters struct {
 	req []*requester
 }
 
-func (r *requester) Sink(s bool) {
+func (r *requester) Sink(s bool) bool {
+	oldState := r.sink
+
 	r.sink = s
+
+	return oldState
 }
 
 func (r *requester) ID() transceiver.ClientID {

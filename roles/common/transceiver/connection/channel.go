@@ -28,6 +28,7 @@ import (
 
 	"github.com/reinit/coward/common/fsm"
 	"github.com/reinit/coward/common/rw"
+	"github.com/reinit/coward/common/ticker"
 	ch "github.com/reinit/coward/roles/common/channel"
 	"github.com/reinit/coward/roles/common/network"
 )
@@ -115,7 +116,7 @@ func (c *channelWriteBuf) Fetch(size int) []byte {
 type channelize struct {
 	conn              network.Connection
 	timeout           time.Duration
-	timeoutTicker     <-chan time.Time
+	timeoutTicker     ticker.Requester
 	buf               [3]byte
 	channels          [ch.MaxChannels]*channel
 	channelsLock      sync.Mutex
@@ -140,7 +141,7 @@ type channel struct {
 	id            ch.ID
 	parent        Channelizer
 	timeout       time.Duration
-	timeoutTicker <-chan time.Time
+	timeoutTicker ticker.Requester
 	connClosed    <-chan struct{}
 	connReader    chan channelReader
 	currentReader channelReader
@@ -152,12 +153,11 @@ type channel struct {
 // Channelize creates a Connection Channel for mulit-channel dispatch
 func Channelize(
 	c network.Connection,
-	timeout time.Duration,
-	timeoutTicker <-chan time.Time,
+	timeoutTicker ticker.Requester,
 ) Channelizer {
 	return &channelize{
 		conn:              errorconn{Connection: c},
-		timeout:           timeout,
+		timeout:           0,
 		timeoutTicker:     timeoutTicker,
 		buf:               [3]byte{},
 		channels:          [ch.MaxChannels]*channel{},
@@ -375,37 +375,35 @@ func (c *channel) Done() error {
 // Read reads data from Virtual Channel
 func (c *channel) Read(b []byte) (int, error) {
 	if c.currentReader.Connection == nil {
-		timeoutExpire := time.Now().Add(c.timeout)
-		timeoutTicker := c.timeoutTicker
+		var timeoutTicker ticker.Wait
 
-		if c.timeout <= 0 {
-			timeoutTicker = nil
+		if c.timeout > 0 && c.timeoutTicker != nil {
+			tWait, tWaitErr := c.timeoutTicker.Request(
+				time.Now().Add(c.timeout))
+
+			if tWaitErr != nil {
+				return 0, tWaitErr
+			}
+
+			defer tWait.Close()
+
+			timeoutTicker = tWait.Wait()
 		}
 
-		hasReader := false
+		select {
+		case reader := <-c.connReader:
+			c.currentReader.Connection = reader.Connection
+			c.currentReader.Length = reader.Length
+			c.currentReader.Complete = reader.Complete
 
-		for !hasReader {
-			select {
-			case reader := <-c.connReader:
-				c.currentReader.Connection = reader.Connection
-				c.currentReader.Length = reader.Length
-				c.currentReader.Complete = reader.Complete
+		case <-c.connClosed:
+			return 0, ErrChannelConnectionDropped
 
-				hasReader = true
+		case <-c.downSignal:
+			return 0, ErrChannelShuttedDown
 
-			case <-c.connClosed:
-				return 0, ErrChannelConnectionDropped
-
-			case <-c.downSignal:
-				return 0, ErrChannelShuttedDown
-
-			case <-timeoutTicker:
-				if time.Now().Before(timeoutExpire) {
-					continue
-				}
-
-				return 0, ErrChannelVirtualConnectionTimedout
-			}
+		case <-timeoutTicker:
+			return 0, ErrChannelVirtualConnectionTimedout
 		}
 	} else if c.Depleted() {
 		return 0, ErrChannelVirtualConnectionSegmentDepleted

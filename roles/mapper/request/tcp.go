@@ -21,10 +21,12 @@
 package request
 
 import (
+	"time"
+
 	"github.com/reinit/coward/common/fsm"
-	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/relay"
 	"github.com/reinit/coward/roles/common/transceiver"
@@ -44,18 +46,21 @@ func TCP(
 	mapper proxycommon.MapID,
 	client network.Connection,
 	runner worker.Runner,
+	timeout time.Duration,
 	shb *common.SharedBuffer,
 ) transceiver.RequestBuilder {
 	return func(
 		id transceiver.ConnectionID,
 		conn rw.ReadWriteDepleteDoner,
+		connCtl transceiver.ConnectionControl,
 		log logger.Logger,
 	) fsm.Machine {
 		return tcp{
 			log: log,
 			relay: relay.New(log, runner, conn, shb.Select(id), tcpRelay{
-				mapper: mapper,
-				client: client,
+				mapper:  mapper,
+				client:  client,
+				timeout: timeout,
 			}, make([]byte, 4096)),
 			cancel: client.Closed(),
 		}

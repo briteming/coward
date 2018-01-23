@@ -29,9 +29,10 @@ import (
 
 // Config Join Configuration
 type Config struct {
-	ConnectionID    network.ConnectionID
-	ConnectionDelay timer.Timer
-	Buffer          []byte
-	Timeout         uint16
-	ClientTimeout   time.Duration
+	ConnectionID     network.ConnectionID
+	ConnectionDelay  timer.Timer
+	Buffer           []byte
+	Timeout          uint16
+	ClientTimeout    time.Duration
+	ClientReqTimeout time.Duration
 }

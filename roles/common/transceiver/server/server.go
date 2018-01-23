@@ -28,6 +28,7 @@ import (
 
 	"github.com/reinit/coward/common/fsm"
 	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/roles/common/channel"
 	"github.com/reinit/coward/roles/common/command"
 	"github.com/reinit/coward/roles/common/network"
@@ -45,13 +46,13 @@ var (
 type server struct {
 	cfg        Config
 	codec      transceiver.CodecBuilder
-	timeTicker <-chan time.Time
+	timeTicker ticker.Requester
 }
 
 // New creates a new transceiver server
 func New(
 	codec transceiver.CodecBuilder,
-	timeTicker <-chan time.Time,
+	timeTicker ticker.Requester,
 	cfg Config,
 ) transceiver.Server {
 	return &server{
@@ -75,7 +76,9 @@ func (s *server) Handle(
 		return ccErr
 	}
 
-	channelized := connection.Channelize(cc, s.cfg.InitialTimeout, s.timeTicker)
+	channelized := connection.Channelize(cc, s.timeTicker)
+	channelized.Timeout(s.cfg.InitialTimeout)
+
 	defer channelized.Shutdown()
 
 	channels := channel.New(func(id channel.ID) fsm.Machine {
@@ -120,20 +123,13 @@ func (s *server) Handle(
 		if chGetErr != nil {
 			connErr, isConnErr := chGetErr.(connection.Error)
 
-			if isConnErr {
-				switch connErr.Get() {
-				case io.EOF: // Oh EOF. Bye!
-
-				default:
-					log.Warningf("Dispatch has failed: %s", chGetErr)
-				}
-			} else {
-				log.Warningf("Dispatch has failed: %s", chGetErr)
+			if !isConnErr || connErr.Get() != io.EOF {
+				log.Warningf("Request dispatch has failed: %s", chGetErr)
 			}
 
 			// If dispatch has failed, no reason to keep the client
 			// connected.
-			// In fact, we has to disconnect the client as when dispatch
+			// In fact, we have to disconnect the client as when dispatch
 			// has failed, the Client <--> Server status sync will be
 			// broken.
 			return chGetErr
@@ -170,12 +166,12 @@ func (s *server) Handle(
 			}
 		}
 
-		switch tickErr.(type) {
-		case connection.Error:
-			return tickErr
-
+		switch tErr := tickErr.(type) {
 		case transceiver.CodecError:
-			return tickErr
+			return tErr
+
+		case connection.Error:
+			return tErr
 		}
 	}
 }

@@ -18,23 +18,21 @@
 //  along with Crypto-Obscured Forwarder. If not, see
 //  <http://www.gnu.org/licenses/>.
 
-package project
+package client
 
-import "github.com/reinit/coward/common/timer"
+import "github.com/reinit/coward/roles/common/network"
 
-type meter struct {
-	connection timer.Timer
-	request    timer.Timer
+// connCtl wraps the client connection
+type connCtl struct {
+	connection network.Connection
 }
 
-func (d meter) ConnectionFailure(e error) {}
-
-func (d meter) Connection() timer.Stopper {
-	return d.connection.Start()
+// Demolish close the connection
+func (c connCtl) Demolish() error {
+	return c.connection.Close()
 }
 
-func (d meter) RequestFailure(e error) {}
-
-func (d meter) Request() timer.Stopper {
-	return d.request.Start()
+// Closed check whether or not the connection is closed
+func (c connCtl) Closed() <-chan struct{} {
+	return c.connection.Closed()
 }

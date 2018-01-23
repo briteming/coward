@@ -29,8 +29,8 @@ type CodecBuilder func(io.ReadWriter) (io.ReadWriter, error)
 type Codec struct {
 	Name   string
 	Usage  string
-	Build  func(configuration []byte) CodecBuilder
-	Verify func(configuration []byte) error
+	Build  func(configuration []string) CodecBuilder
+	Verify func(configuration []string) error
 }
 
 // CodecError is the error of codec

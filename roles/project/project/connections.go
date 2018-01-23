@@ -30,59 +30,43 @@ const (
 	connectionPingTickDelay = 333 * time.Millisecond
 )
 
-type connectionPingTicker struct {
-	Ticker <-chan time.Time
+type connectionPingTickPermit struct {
 	Resume chan struct{}
 	Next   time.Time
 }
 
 type connection struct {
 	Buffer         []byte
-	PingTicker     *time.Ticker
-	PingTickerChan chan connectionPingTicker
-}
-
-type connectionData struct {
-	Buffer       []byte
-	PingTicker   chan connectionPingTicker
-	PeriodTicker <-chan time.Time
+	PingTickPermit chan connectionPingTickPermit
 }
 
 type connections struct {
-	connections  map[transceiver.ConnectionID]connection
-	periodTicker <-chan time.Time
+	connections map[transceiver.ConnectionID]connection
 }
 
-func (c *connections) Get(cID transceiver.ConnectionID) connectionData {
+func (c *connections) Get(cID transceiver.ConnectionID) connection {
 	cc, ccFound := c.connections[cID]
 
 	if ccFound {
-		return connectionData{
-			Buffer:       cc.Buffer,
-			PingTicker:   cc.PingTickerChan,
-			PeriodTicker: c.periodTicker,
+		return connection{
+			Buffer:         cc.Buffer,
+			PingTickPermit: cc.PingTickPermit,
 		}
 	}
 
 	cc = connection{
 		Buffer:         make([]byte, 4096),
-		PingTicker:     time.NewTicker(connectionPingTickDelay),
-		PingTickerChan: make(chan connectionPingTicker, 1),
+		PingTickPermit: make(chan connectionPingTickPermit, 1),
 	}
 
-	cc.PingTickerChan <- connectionPingTicker{
-		Ticker: cc.PingTicker.C,
+	cc.PingTickPermit <- connectionPingTickPermit{
 		Resume: make(chan struct{}, 1),
 		Next:   time.Time{},
 	}
 
 	c.connections[cID] = cc
 
-	return connectionData{
-		Buffer:       cc.Buffer,
-		PingTicker:   cc.PingTickerChan,
-		PeriodTicker: c.periodTicker,
-	}
+	return cc
 }
 
 func (c *connections) Clear() {
@@ -90,9 +74,7 @@ func (c *connections) Clear() {
 	deleteKeys := make([]transceiver.ConnectionID, len(c.connections))
 
 	for cKey := range c.connections {
-		c.connections[cKey].PingTicker.Stop()
-
-		close(c.connections[cKey].PingTickerChan)
+		close(c.connections[cKey].PingTickPermit)
 
 		deleteKeys[deleteIdx] = cKey
 		deleteIdx++

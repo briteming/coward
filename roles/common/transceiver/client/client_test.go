@@ -29,6 +29,7 @@ import (
 	"github.com/reinit/coward/common/fsm"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/common/timer"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/transceiver"
@@ -125,9 +126,19 @@ func TestClientUpDown(t *testing.T) {
 			return make(chan dummyConnReading, 1)
 		},
 	}
-	requestWaitTicker := time.NewTicker(300 * time.Second)
-	defer requestWaitTicker.Stop()
-	c := New(0, log, dialer, testDummyEncodec, requestWaitTicker.C, Config{
+
+	requestWaitTicker, requestWaitErr := ticker.New(
+		300*time.Millisecond, 1024).Serve()
+
+	if requestWaitErr != nil {
+		t.Error("Failed to startup Ticker:", requestWaitErr)
+
+		return
+	}
+
+	defer requestWaitTicker.Close()
+
+	c := New(0, log, dialer, testDummyEncodec, requestWaitTicker, Config{
 		MaxConcurrent:        100,
 		RequestRetries:       10,
 		InitialTimeout:       1 * time.Second,
@@ -217,6 +228,7 @@ func dummyRequestBuilder(sleep bool) transceiver.RequestBuilder {
 	return func(
 		id transceiver.ConnectionID,
 		conn rw.ReadWriteDepleteDoner,
+		ctl transceiver.ConnectionControl,
 		log logger.Logger,
 	) fsm.Machine {
 		return dummyRequestMachine{
@@ -242,6 +254,8 @@ func (d dummyMeter) Request() timer.Stopper {
 	return dummyMeterStopper{}
 }
 
+func (d dummyMeter) RequestFailure(e error) {}
+
 func TestClientUpRequestThenDown(t *testing.T) {
 	log := logger.NewDitch()
 	dialer := &dummyDialer{
@@ -249,9 +263,19 @@ func TestClientUpRequestThenDown(t *testing.T) {
 			return make(chan dummyConnReading, 1)
 		},
 	}
-	requestWaitTicker := time.NewTicker(300 * time.Second)
-	defer requestWaitTicker.Stop()
-	c := New(0, log, dialer, testDummyEncodec, requestWaitTicker.C, Config{
+
+	requestWaitTicker, requestWaitErr := ticker.New(
+		300*time.Millisecond, 1024).Serve()
+
+	if requestWaitErr != nil {
+		t.Error("Failed to startup Ticker:", requestWaitErr)
+
+		return
+	}
+
+	defer requestWaitTicker.Close()
+
+	c := New(0, log, dialer, testDummyEncodec, requestWaitTicker, Config{
 		MaxConcurrent:        16,
 		RequestRetries:       10,
 		InitialTimeout:       1 * time.Second,
@@ -294,9 +318,19 @@ func BenchmarkClientRequest(b *testing.B) {
 			return make(chan dummyConnReading, 1)
 		},
 	}
-	requestWaitTicker := time.NewTicker(300 * time.Second)
-	defer requestWaitTicker.Stop()
-	c := New(0, log, dialer, testDummyEncodec, requestWaitTicker.C, Config{
+
+	requestWaitTicker, requestWaitErr := ticker.New(
+		300*time.Millisecond, 1024).Serve()
+
+	if requestWaitErr != nil {
+		b.Error("Failed to startup Ticker:", requestWaitErr)
+
+		return
+	}
+
+	defer requestWaitTicker.Close()
+
+	c := New(0, log, dialer, testDummyEncodec, requestWaitTicker, Config{
 		MaxConcurrent:        16,
 		RequestRetries:       10,
 		InitialTimeout:       10 * time.Second,

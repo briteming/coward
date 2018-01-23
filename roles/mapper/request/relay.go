@@ -18,23 +18,29 @@
 //  along with Crypto-Obscured Forwarder. If not, see
 //  <http://www.gnu.org/licenses/>.
 
-package project
+package request
 
-import "github.com/reinit/coward/common/timer"
+import (
+	"time"
 
-type meter struct {
-	connection timer.Timer
-	request    timer.Timer
+	"github.com/reinit/coward/roles/common/network"
+)
+
+type relayConn struct {
+	network.Connection
+
+	timeout         time.Duration
+	timeoutExpanded bool
 }
 
-func (d meter) ConnectionFailure(e error) {}
+func (t *relayConn) Read(b []byte) (int, error) {
+	rLen, rErr := t.Connection.Read(b)
 
-func (d meter) Connection() timer.Stopper {
-	return d.connection.Start()
-}
+	if !t.timeoutExpanded {
+		t.Connection.SetTimeout(t.timeout)
 
-func (d meter) RequestFailure(e error) {}
+		t.timeoutExpanded = true
+	}
 
-func (d meter) Request() timer.Stopper {
-	return d.request.Start()
+	return rLen, rErr
 }

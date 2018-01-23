@@ -33,6 +33,8 @@ func (d meter) Connection() timer.Stopper {
 	return d.connection.Start()
 }
 
+func (d meter) RequestFailure(e error) {}
+
 func (d meter) Request() timer.Stopper {
 	return d.request.Start()
 }

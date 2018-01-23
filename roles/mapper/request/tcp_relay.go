@@ -23,9 +23,11 @@ package request
 import (
 	"errors"
 	"io"
+	"time"
 
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
+	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/relay"
 	proxycommon "github.com/reinit/coward/roles/proxy/common"
 	"github.com/reinit/coward/roles/proxy/request"
@@ -55,8 +57,9 @@ var (
 )
 
 type tcpRelay struct {
-	mapper proxycommon.MapID
-	client io.ReadWriteCloser
+	mapper  proxycommon.MapID
+	client  network.Connection
+	timeout time.Duration
 }
 
 func (c tcpRelay) Initialize(l logger.Logger, server relay.Server) error {
@@ -112,5 +115,9 @@ func (c tcpRelay) Initialize(l logger.Logger, server relay.Server) error {
 
 func (c tcpRelay) Client(
 	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
-	return c.client, nil
+	return &relayConn{
+		Connection:      c.client,
+		timeout:         c.timeout,
+		timeoutExpanded: false,
+	}, nil
 }

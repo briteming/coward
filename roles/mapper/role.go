@@ -120,7 +120,7 @@ type ConfigInput struct {
 	RequestTimeout uint16          `json:"request_timeout" cfg:"rt,-request-timeout:The maximum wait time in second for the server to respond the Initial request of a client.\r\n\r\nIf the COWARD Proxy server has failed to respond the Initial request within this period of time, the connection will be considered broken and thus be closed.\r\n\r\nIt is recommended to set this value slightly greater than the \"--initial-timeout\" setting on the COWARD Proxy server."`
 	Mapping        []ConfigMapping `json:"mapping" cfg:"m,-mapping:Enable and configure mapped remote destinations.\r\n\r\nThis will allow you to map the pre-defined destinations on the Proxy as local servers.\r\n\r\nAll access to these servers will be relayed to their corresponding remote destinations transparently through the COWARD Proxy server."`
 	Codec          string          `json:"codec" cfg:"e,-codec:Specify which Codec will be used to encode and decode data payload to and from a connection."`
-	CodecSetting   string          `json:"codec_setting" cfg:"es,-codec-cfg:Configuration of the Codec.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
+	CodecSetting   []string        `json:"codec_setting" cfg:"es,-codec-cfg:Configuration of the Codec as an array of string.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
 }
 
 // GetDescription gets description
@@ -259,7 +259,7 @@ func (c *ConfigInput) VerifyCodecSetting() error {
 		return errors.New("Codec must be specified")
 	}
 
-	return c.selectedCodec.Verify([]byte(c.CodecSetting))
+	return c.selectedCodec.Verify(c.CodecSetting)
 }
 
 // Verify Verifies
@@ -305,7 +305,7 @@ func (c *ConfigInput) Verify() error {
 	}
 
 	if c.selectedCodec.Verify != nil {
-		vErr := c.selectedCodec.Verify([]byte(c.CodecSetting))
+		vErr := c.selectedCodec.Verify(c.CodecSetting)
 
 		if vErr != nil {
 			return errors.New("Codec Setting was invalid: " + vErr.Error())
@@ -334,7 +334,7 @@ func Role() role.Registration {
 				RequestTimeout: 0,
 				Mapping:        []ConfigMapping{},
 				Codec:          "",
-				CodecSetting:   "",
+				CodecSetting:   nil,
 			}
 		},
 		Generater: func(
@@ -364,7 +364,7 @@ func Role() role.Registration {
 			}
 
 			return New(
-				cfg.selectedCodec.Build([]byte(cfg.CodecSetting)),
+				cfg.selectedCodec.Build(cfg.CodecSetting),
 				dialer,
 				log,
 				Config{

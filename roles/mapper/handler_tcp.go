@@ -23,9 +23,9 @@ package mapper
 import (
 	"time"
 
-	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/timer"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/transceiver"
 	"github.com/reinit/coward/roles/mapper/common"
@@ -40,6 +40,7 @@ type tcpHandler struct {
 	shb         *common.SharedBuffer
 	transceiver transceiver.Requester
 	timeout     time.Duration
+	reqTimeout  time.Duration
 }
 
 type tcpClient struct {
@@ -49,6 +50,7 @@ type tcpClient struct {
 	cfg         Config
 	transceiver transceiver.Requester
 	timeout     time.Duration
+	reqTimeout  time.Duration
 	shb         *common.SharedBuffer
 	runner      worker.Runner
 }
@@ -64,6 +66,7 @@ func (d tcpHandler) New(
 		cfg:         d.cfg,
 		transceiver: d.transceiver,
 		timeout:     d.timeout,
+		reqTimeout:  d.reqTimeout,
 		shb:         d.shb,
 		runner:      d.runner,
 	}, nil
@@ -78,11 +81,11 @@ func (d tcpClient) Serve() error {
 		request:    timer.New(),
 	}
 
-	d.conn.SetTimeout(d.timeout)
+	d.conn.SetTimeout(d.reqTimeout)
 
 	_, reqErr := d.transceiver.Request(
 		d.logger,
-		request.TCP(d.mapper, d.conn, d.runner, d.shb),
+		request.TCP(d.mapper, d.conn, d.runner, d.timeout, d.shb),
 		d.conn.Closed(), metering)
 
 	if reqErr != nil {

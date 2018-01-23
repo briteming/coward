@@ -27,6 +27,7 @@ import (
 
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/role"
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 	tcpconn "github.com/reinit/coward/roles/common/network/connection/tcp"
@@ -49,7 +50,7 @@ var (
 )
 
 const (
-	periodTickerDelay = 5 * time.Second
+	tickerDelay = 300 * time.Millisecond
 )
 
 type projectile struct {
@@ -60,7 +61,7 @@ type projectile struct {
 	transceiver     transceiver.Requester
 	runner          worker.Runner
 	projects        project.Projects
-	periodTicker    *time.Ticker
+	ticker          ticker.RequestCloser
 	unspawnNotifier role.UnspawnNotifier
 }
 
@@ -78,7 +79,7 @@ func New(
 		cfg:             cfg,
 		transceiver:     nil,
 		runner:          nil,
-		periodTicker:    nil,
+		ticker:          nil,
 		unspawnNotifier: nil,
 	}
 }
@@ -92,7 +93,13 @@ func (s *projectile) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 	}
 
 	// Start ticker
-	s.periodTicker = time.NewTicker(periodTickerDelay)
+	tticker, tickerErr := ticker.New(tickerDelay, 1024).Serve()
+
+	if tickerErr != nil {
+		return tickerErr
+	}
+
+	s.ticker = tticker
 
 	// Start Corunner
 	runner, runnerServeErr := worker.New(s.logger, worker.Config{
@@ -173,11 +180,12 @@ func (s *projectile) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		s.logger,
 		s.transceiver,
 		s.runner,
-		s.periodTicker.C,
+		s.ticker,
 		pRegisterations,
 		project.Config{
 			MaxConnections: trConnections,
 			PingTickDelay:  pingTimeout,
+			RequestTimeout: s.cfg.TransceiverInitialTimeout,
 		})
 
 	if pProjectErr != nil {
@@ -201,11 +209,6 @@ func (s *projectile) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 func (s *projectile) Unspawn() error {
 	s.logger.Infof("Closing")
 
-	if s.periodTicker != nil {
-		s.periodTicker.Stop()
-		s.periodTicker = nil
-	}
-
 	if s.projects != nil {
 		// Kick first so no new transceiver connection can be created
 		s.projects.Kick()
@@ -226,6 +229,11 @@ func (s *projectile) Unspawn() error {
 	if s.projects != nil {
 		s.projects.Close()
 		s.projects = nil
+	}
+
+	if s.ticker != nil {
+		s.ticker.Close()
+		s.ticker = nil
 	}
 
 	if s.runner != nil {

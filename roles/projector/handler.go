@@ -80,11 +80,12 @@ func (d client) Serve() error {
 			d.runner,
 			d.logger,
 			join.Config{
-				ConnectionID:    d.conn.ID(),
-				ConnectionDelay: timer.Average(),
-				Buffer:          buf[:],
-				Timeout:         d.minTimeout,
-				ClientTimeout:   d.cfg.IdleTimeout,
+				ConnectionID:     d.conn.ID(),
+				ConnectionDelay:  timer.Average(),
+				Buffer:           buf[:],
+				Timeout:          d.minTimeout,
+				ClientTimeout:    d.cfg.IdleTimeout,
+				ClientReqTimeout: d.cfg.InitialTimeout,
 			},
 		)),
 	)

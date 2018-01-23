@@ -28,9 +28,11 @@ import (
 	"github.com/reinit/coward/common/fsm"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/relay"
+	"github.com/reinit/coward/roles/common/transceiver"
 	"github.com/reinit/coward/roles/projector/request"
 	"github.com/reinit/coward/roles/projector/request/join"
 )
@@ -55,6 +57,10 @@ var (
 
 	ErrHandlerKeepAliveStopAlreadyStopped = errors.New(
 		"Can't stop KeepAlive because it already been stopped")
+
+	ErrHandlerKeepAlivePingRespondTimedout = errors.New(
+		"Server didn't respond the last ping request in given time, " +
+			"the connection may be already down")
 
 	ErrHandlerWaitUnknownSignal = errors.New(
 		"Unknown Wait signal has been received")
@@ -93,24 +99,27 @@ func (r requesterKeepAliveTickResumer) Resume() {
 
 // requester handling the request
 type requester struct {
-	projection            Endpoint
-	dialer                network.Dialer
-	runner                worker.Runner
-	buf                   []byte
-	project               *project
-	pingTickTimeout       time.Duration
-	idleQuitTimeout       time.Duration
-	currentRelay          relay.Relay
-	pendingRelay          bool
-	keepAliveResult       chan error
-	keepAlivePingTicker   chan connectionPingTicker
-	keepAlivePeriodTicker <-chan time.Time
-	keepAliveTickResume   chan requesterKeepAliveTickResumer
-	keepAliveQuit         chan struct{}
-	rw                    rw.ReadWriteDepleteDoner
-	log                   logger.Logger
-	serverPingDelay       time.Duration
-	noCloseSignalToRemote bool
+	projection              Endpoint
+	dialer                  network.Dialer
+	runner                  worker.Runner
+	buf                     []byte
+	project                 *project
+	pingTickTimeout         time.Duration
+	connRequestTimeout      time.Duration
+	idleQuitTimeout         time.Duration
+	currentRelay            relay.Relay
+	pendingRelay            bool
+	ticker                  ticker.Requester
+	noRelease               bool
+	keepAliveResult         chan error
+	keepAlivePingTickPermit chan connectionPingTickPermit
+	keepAliveTickResume     chan requesterKeepAliveTickResumer
+	keepAliveQuit           chan struct{}
+	rw                      rw.ReadWriteDepleteDoner
+	connCtl                 transceiver.ConnectionControl
+	log                     logger.Logger
+	serverPingDelay         time.Duration
+	noCloseSignalToRemote   bool
 }
 
 // Bootup startup requests
@@ -180,10 +189,12 @@ func (h *requester) Bootup() (fsm.State, error) {
 
 // keepalive sends ping request to keep the connection alive
 func (h *requester) keepalive(l logger.Logger) error {
-	pingTickerEnabled := false
-	idleQuitTime := time.Now().Add(h.idleQuitTimeout)
-	currentConnectionPingTicker := connectionPingTicker{
-		Ticker: nil,
+	var nextKeepAliveExpire time.Time
+	var releaseWaiter ticker.Waiter
+	var pingWaiter ticker.Waiter
+
+	pingTickPermitted := false
+	currentPingPermit := connectionPingTickPermit{
 		Resume: nil,
 		Next:   time.Time{},
 	}
@@ -193,94 +204,77 @@ func (h *requester) keepalive(l logger.Logger) error {
 	defer func() {
 		h.project.DecreaseIdleCount()
 
-		if pingTickerEnabled {
-			h.keepAlivePingTicker <- currentConnectionPingTicker
+		if pingTickPermitted {
+			h.keepAlivePingTickPermit <- currentPingPermit
+		}
+
+		if releaseWaiter != nil {
+			releaseWaiter.Close()
+		}
+
+		if pingWaiter != nil {
+			pingWaiter.Close()
 		}
 	}()
 
-	var currentConnectionPingTickerChan <-chan time.Time
+	var pingSignalChan ticker.Wait
+	var releaseSignalChan ticker.Wait
+	var currentReleaseSignalChan ticker.Wait
 
-	currentConnectionPeriodTickerChan := h.keepAlivePeriodTicker
+	if !h.noRelease {
+		waitReq, waitReqErr := h.ticker.Request(
+			time.Now().Add(h.idleQuitTimeout))
+
+		if waitReqErr != nil {
+			return waitReqErr
+		}
+
+		releaseWaiter = waitReq
+		releaseSignalChan = waitReq.Wait()
+
+		currentReleaseSignalChan = releaseSignalChan
+	}
 
 	for {
 		select {
 		case <-h.keepAliveQuit:
 			return nil
 
-		case pingTicker, ok := <-h.keepAlivePingTicker:
+		case pingTickPermit, ok := <-h.keepAlivePingTickPermit:
 			if !ok {
 				return ErrHandlerKeepAliveTickerClosed
 			}
 
-			// When we received a ping ticker, an initial state will be set:
-			//
-			// First, we declare the pingTicker as enabled, so it will be
-			// returned to the h.keepAlivePingTicker channel for other
-			// keepalives to receive.
-			//
-			// Then, we record the received keepAlivePingTicker to
-			// currentConnectionPingTicker so we know what we need to return.
-			//
-			// Last, we apply currentConnectionPingTicker.Ticker to
-			// currentConnectionPingTickerChan, so the pingTicker can actually
-			// began.
-
-			pingTickerEnabled = true
-			currentConnectionPingTicker = pingTicker
-			currentConnectionPingTickerChan = currentConnectionPingTicker.Ticker
-
 			now := time.Now()
 
-			if now.Before(pingTicker.Next) {
-				continue
-			}
+			nextKeepAliveExpire = now.Add(h.connRequestTimeout)
+			currentPingPermit = pingTickPermit
+			pingTickPermitted = true
 
-			// Trigger a ping send when we received a ping ticker
-			select {
-			case h.keepAliveTickResume <- requesterKeepAliveTickResumer{
-				resumer: currentConnectionPingTicker.Resume,
-				is:      requesterKeepAliveTickResumePing,
-			}:
-				currentConnectionPingTicker.Next = time.Now().Add(
-					h.serverPingDelay)
-
-				currentConnectionPingTickerChan = nil
-				currentConnectionPeriodTickerChan = nil
-
-				_, wErr := rw.WriteFull(
-					h.rw, []byte{join.RespondClientPingRequest})
-
-				if wErr != nil {
-					return wErr
-				}
-
-			default:
+			if pingWaiter != nil {
+				pingWaiter.Close()
+				pingWaiter = nil
 			}
 
 			l.Debugf("Pinger received")
 
-		case <-currentConnectionPingTicker.Resume:
-			currentConnectionPingTickerChan = currentConnectionPingTicker.Ticker
-			currentConnectionPeriodTickerChan = h.keepAlivePeriodTicker
+			waitReq, waitReqErr := h.ticker.Request(currentPingPermit.Next)
 
-		case <-currentConnectionPingTickerChan:
-			now := time.Now()
-
-			if now.Before(currentConnectionPingTicker.Next) {
-				continue
+			if waitReqErr != nil {
+				return waitReqErr
 			}
 
-			currentConnectionPingTicker.Next = now.Add(h.serverPingDelay)
+			pingWaiter = waitReq
+			pingSignalChan = waitReq.Wait()
 
-			// Make sure we don't send another ping when current ping hasn't
-			// been finished
 			select {
 			case h.keepAliveTickResume <- requesterKeepAliveTickResumer{
-				resumer: currentConnectionPingTicker.Resume,
+				resumer: currentPingPermit.Resume,
 				is:      requesterKeepAliveTickResumePing,
 			}:
-				currentConnectionPingTickerChan = nil
-				currentConnectionPeriodTickerChan = nil
+				currentPingPermit.Next = now.Add(h.serverPingDelay)
+
+				currentReleaseSignalChan = nil
 
 				_, wErr := rw.WriteFull(
 					h.rw, []byte{join.RespondClientPingRequest})
@@ -295,28 +289,81 @@ func (h *requester) keepalive(l logger.Logger) error {
 				// There are another Ping ticker still waiting to be finished
 			}
 
-		case <-currentConnectionPeriodTickerChan:
-			now := time.Now()
+		case <-currentPingPermit.Resume:
+			currentReleaseSignalChan = releaseSignalChan
 
-			if now.Before(idleQuitTime) {
-				continue
+		case <-pingSignalChan:
+			pingWaiter = nil
+
+			now := time.Now()
+			nextPing := now.Add(h.serverPingDelay)
+
+			waitReq, waitReqErr := h.ticker.Request(nextPing)
+
+			if waitReqErr != nil {
+				return waitReqErr
 			}
 
-			idleQuitTime = now.Add(h.idleQuitTimeout)
+			pingWaiter = waitReq
+			pingSignalChan = waitReq.Wait()
+
+			// Make sure we don't send another ping when current ping hasn't
+			// been finished
+			select {
+			case h.keepAliveTickResume <- requesterKeepAliveTickResumer{
+				resumer: currentPingPermit.Resume,
+				is:      requesterKeepAliveTickResumePing,
+			}:
+				currentPingPermit.Next = nextPing
+				nextKeepAliveExpire = now.Add(h.connRequestTimeout)
+
+				currentReleaseSignalChan = nil
+
+				_, wErr := rw.WriteFull(
+					h.rw, []byte{join.RespondClientPingRequest})
+
+				if wErr != nil {
+					return wErr
+				}
+
+				l.Debugf("Ping requested")
+
+			default:
+				// Check whether or not we are excceed the max respond wait
+				// time and kill the connection if it did.
+				if now.After(nextKeepAliveExpire) {
+					h.connCtl.Demolish()
+
+					l.Debugf("Server failed to respond the last Ping request " +
+						"in time, connection maybe already lost")
+
+					return ErrHandlerKeepAlivePingRespondTimedout
+				}
+
+				// There are another Ping ticker still waiting to be finished
+			}
+
+		case <-currentReleaseSignalChan:
+			releaseWaiter = nil
+
+			now := time.Now()
+			waitReq, waitReqErr := h.ticker.Request(now.Add(h.idleQuitTimeout))
+
+			if waitReqErr != nil {
+				return waitReqErr
+			}
+
+			releaseWaiter = waitReq
+			releaseSignalChan = waitReq.Wait()
 
 			select {
 			case h.keepAliveTickResume <- requesterKeepAliveTickResumer{
-				resumer: currentConnectionPingTicker.Resume,
+				resumer: currentPingPermit.Resume,
 				is:      requesterKeepAliveTickResumeQuit,
 			}:
-				// Stop both PingTicker and PeriodTicker.
-				//
-				// Notice They're designed to be re-enabled by writing to the
-				// currentConnectionPingTicker.Resume channel, however it's
-				// largly unnecessary to actually do because we're quiting :)
+				nextKeepAliveExpire = now.Add(h.connRequestTimeout)
 
-				currentConnectionPingTickerChan = nil
-				currentConnectionPeriodTickerChan = nil
+				currentReleaseSignalChan = nil
 
 				// Notice NO ANY other command will be send after Quit request
 				_, wErr := rw.WriteFull(h.rw, []byte{join.RespondClientRelease})

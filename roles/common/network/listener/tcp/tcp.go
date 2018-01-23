@@ -23,7 +23,6 @@ package tcp
 import (
 	"net"
 	"strconv"
-	"time"
 
 	"github.com/reinit/coward/roles/common/network"
 )
@@ -32,14 +31,12 @@ import (
 type listener struct {
 	host              net.IP
 	port              uint16
-	timeout           time.Duration
 	connectionWrapper network.ConnectionWrapper
 }
 
 // acceptor is a TCP acceptor
 type acceptor struct {
 	listener          *net.TCPListener
-	timeout           time.Duration
 	connectionWrapper network.ConnectionWrapper
 	closed            chan struct{}
 }
@@ -48,13 +45,11 @@ type acceptor struct {
 func New(
 	host net.IP,
 	port uint16,
-	timeout time.Duration,
 	connectionWrapper network.ConnectionWrapper,
 ) network.Listener {
 	return listener{
 		host:              host,
 		port:              port,
-		timeout:           timeout,
 		connectionWrapper: connectionWrapper,
 	}
 }
@@ -73,7 +68,6 @@ func (t listener) Listen() (network.Acceptor, error) {
 
 	return acceptor{
 		listener:          listener,
-		timeout:           t.timeout,
 		connectionWrapper: t.connectionWrapper,
 		closed:            make(chan struct{}),
 	}, nil
@@ -104,11 +98,7 @@ func (a acceptor) Accept() (network.Connection, error) {
 		return nil, slErr
 	}
 
-	connection := a.connectionWrapper(accepted)
-
-	connection.SetTimeout(a.timeout)
-
-	return connection, nil
+	return a.connectionWrapper(accepted), nil
 }
 
 // Closed return whether or not current acceptor is closed

@@ -26,11 +26,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/roles/common/network"
-)
-
-const (
-	deadlineTickDelay = 300 * time.Millisecond
 )
 
 type listener struct {
@@ -39,6 +36,7 @@ type listener struct {
 	timeout           time.Duration
 	maxSize           uint32
 	buffer            []byte
+	ticker            ticker.Requester
 	connectionWrapper network.ConnectionWrapper
 }
 
@@ -49,6 +47,7 @@ func New(
 	timeout time.Duration,
 	maxSize uint32,
 	buf []byte,
+	tk ticker.Requester,
 	connectionWrapper network.ConnectionWrapper,
 ) network.Listener {
 	return listener{
@@ -57,6 +56,7 @@ func New(
 		timeout:           timeout,
 		maxSize:           maxSize,
 		buffer:            buf,
+		ticker:            tk,
 		connectionWrapper: connectionWrapper,
 	}
 }
@@ -76,7 +76,7 @@ func (t listener) Listen() (network.Acceptor, error) {
 	return &acceptor{
 		listener:          listen,
 		timeout:           t.timeout,
-		deadlineTick:      time.NewTicker(deadlineTickDelay),
+		deadlineTick:      t.ticker,
 		maxSize:           t.maxSize,
 		buffer:            t.buffer,
 		connectionWrapper: t.connectionWrapper,

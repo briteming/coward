@@ -21,13 +21,14 @@
 package marker
 
 import (
-	"errors"
 	"time"
+
+	"github.com/reinit/coward/roles/common/transceiver"
 )
 
 // Errors
 var (
-	ErrAlreadyExisted = errors.New(
+	ErrAlreadyExisted = transceiver.NewCodecError(
 		"Marker already existed")
 )
 

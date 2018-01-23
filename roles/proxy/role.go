@@ -87,7 +87,7 @@ type ConfigInput struct {
 	ChannelDispatchDelay uint16          `json:"channel_dispatch_delay" cfg:"cd,-channel-delay:A delay of time in millisecond in between Connection Channel data dispatch operations.\r\n\r\nThe main propose of this setting is to limit the CPU usage of the Connection Channel data dispatch. However, it can also in part be use to control the server's connection bandwidth (Higher the delay, lower the bandwidth and CPU usage)."`
 	Mapping              []ConfigMapping `json:"mapping" cfg:"m,-mapping:Pre-defined local and remote destinations.\r\n\r\nYou can define both local and remote destinations as server will not enforce access limitation here (In opposite of the dynamical Connect request, which will deny all local accesses)."`
 	Codec                string          `json:"codec" cfg:"e,-codec:Specify which Codec will be used to encode and decode data payload to and from a connection."`
-	CodecSetting         string          `json:"codec_setting" cfg:"es,-codec-cfg:Configuration of the Codec.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
+	CodecSetting         []string        `json:"codec_setting" cfg:"es,-codec-cfg:Configuration of the Codec as an array of string.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
 }
 
 // GetDescription get descriptions
@@ -230,7 +230,7 @@ func (c *ConfigInput) VerifyCodecSetting() error {
 		return errors.New("Codec must be specified")
 	}
 
-	return c.selectedCodec.Verify([]byte(c.CodecSetting))
+	return c.selectedCodec.Verify(c.CodecSetting)
 }
 
 // Verify Verify all settings
@@ -264,7 +264,7 @@ func (c *ConfigInput) Verify() error {
 	}
 
 	if c.selectedCodec.Verify != nil {
-		vErr := c.selectedCodec.Verify([]byte(c.CodecSetting))
+		vErr := c.selectedCodec.Verify(c.CodecSetting)
 
 		if vErr != nil {
 			return errors.New("Codec Setting was invalid: " + vErr.Error())
@@ -292,7 +292,7 @@ func Role() role.Registration {
 				ChannelDispatchDelay: 20,
 				Mapping:              []ConfigMapping{},
 				Codec:                "",
-				CodecSetting:         "",
+				CodecSetting:         nil,
 			}
 		},
 		Generater: func(
@@ -305,7 +305,6 @@ func Role() role.Registration {
 			listen := tcp.New(
 				cfg.selectedInterface,
 				cfg.Port,
-				time.Duration(cfg.InitialTimeout)*time.Second,
 				tcpconn.Wrap)
 
 			mapps := make([]Mapped, len(cfg.Mapping))
@@ -320,7 +319,7 @@ func Role() role.Registration {
 			}
 
 			return New(
-				cfg.selectedCodec.Build([]byte(cfg.CodecSetting)),
+				cfg.selectedCodec.Build(cfg.CodecSetting),
 				listen,
 				log,
 				Config{

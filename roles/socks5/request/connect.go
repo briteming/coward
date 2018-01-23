@@ -25,9 +25,9 @@ import (
 	"time"
 
 	"github.com/reinit/coward/common/fsm"
-	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/relay"
 	"github.com/reinit/coward/roles/common/transceiver"
@@ -79,6 +79,7 @@ func Connect(
 		cID transceiver.ClientID,
 		id transceiver.ConnectionID,
 		conn rw.ReadWriteDepleteDoner,
+		connCtl transceiver.ConnectionControl,
 		log logger.Logger,
 	) fsm.Machine {
 		return connect{

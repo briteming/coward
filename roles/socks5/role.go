@@ -28,6 +28,7 @@ import (
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/print"
 	"github.com/reinit/coward/common/role"
+	"github.com/reinit/coward/common/ticker"
 	tcpconn "github.com/reinit/coward/roles/common/network/connection/tcp"
 	"github.com/reinit/coward/roles/common/network/dialer/tcp"
 	tcplisten "github.com/reinit/coward/roles/common/network/listener/tcp"
@@ -39,16 +40,16 @@ import (
 type ConfigProxy struct {
 	components     []interface{}
 	selectedCodec  transceiver.Codec
-	Host           string `json:"host" cfg:"h,-host:Host name of the remote COWARD Proxy server.\r\n\r\nMust matchs the setting on server."`
-	Port           uint16 `json:"port" cfg:"p,-port:Port number of the remote COWARD Proxy server.\r\n\r\nMust matchs the setting on server."`
-	Connections    uint32 `json:"connections" cfg:"c,-connections:The maximum concurrent connections that can be established to a COWARD Proxy server."`
-	RequestRetries uint8  `json:"retries" cfg:"r,-retries:How many times a failed Initial request can be retried."`
-	Timeout        uint16 `json:"timeout" cfg:"t,-timeout:The maximum idle time in second of the established proxy connection.\r\n\r\nIf the proxy connection consecutively idle during this period of time, then that connection will be considered as inactive and thus be disconnected.\r\n\r\nIt is recommended to set this value no greater than the related one on the COWARD Proxy server setting."`
-	RequestTimeout uint16 `json:"request_timeout" cfg:"rt,-request-timeout:The maximum wait time in second for the server to respond the Initial request of a client.\r\n\r\nIf the COWARD Proxy server has failed to respond the Initial request within this period of time, the connection will be considered broken and thus be closed.\r\n\r\nIt is recommended to set this value slightly greater than the \"--initial-timeout\" setting on the COWARD Proxy server."`
-	Channels       uint8  `json:"channels" cfg:"n,-channels:How many requests can be simultaneously opened on a single established connection.\r\n\r\nSet the value greater than 1 so a single connection can be use to transport multiple requests (Multiplexing).\r\n\r\nWARNING:\r\nThis value must matchs or smaller than the related setting on the COWARD Proxy server, otherwise the request will be come malformed and thus dropped."`
-	Persistent     bool   `json:"persist" cfg:"k,-persist:Whether or not to keep the connection to the COWARD Proxy active after all requests on the connection is completed."`
-	Codec          string `json:"codec" cfg:"e,-codec:Specify which Codec will be used to encode and decode data payload to and from a connection."`
-	CodecSetting   string `json:"codec_setting" cfg:"es,-codec-cfg:Configuration of the Codec.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
+	Host           string   `json:"host" cfg:"h,-host:Host name of the remote COWARD Proxy server.\r\n\r\nMust matchs the setting on server."`
+	Port           uint16   `json:"port" cfg:"p,-port:Port number of the remote COWARD Proxy server.\r\n\r\nMust matchs the setting on server."`
+	Connections    uint32   `json:"connections" cfg:"c,-connections:The maximum concurrent connections that can be established to a COWARD Proxy server."`
+	RequestRetries uint8    `json:"retries" cfg:"r,-retries:How many times a failed Initial request can be retried."`
+	Timeout        uint16   `json:"timeout" cfg:"t,-timeout:The maximum idle time in second of the established proxy connection.\r\n\r\nIf the proxy connection consecutively idle during this period of time, then that connection will be considered as inactive and thus be disconnected.\r\n\r\nIt is recommended to set this value no greater than the related one on the COWARD Proxy server setting."`
+	RequestTimeout uint16   `json:"request_timeout" cfg:"rt,-request-timeout:The maximum wait time in second for the server to respond the Initial request of a client.\r\n\r\nIf the COWARD Proxy server has failed to respond the Initial request within this period of time, the connection will be considered broken and thus be closed.\r\n\r\nIt is recommended to set this value slightly greater than the \"--initial-timeout\" setting on the COWARD Proxy server."`
+	Channels       uint8    `json:"channels" cfg:"n,-channels:How many requests can be simultaneously opened on a single established connection.\r\n\r\nSet the value greater than 1 so a single connection can be use to transport multiple requests (Multiplexing).\r\n\r\nWARNING:\r\nThis value must matchs or smaller than the related setting on the COWARD Proxy server, otherwise the request will be come malformed and thus dropped."`
+	Persistent     bool     `json:"persist" cfg:"k,-persist:Whether or not to keep the connection to the COWARD Proxy active after all requests on the connection is completed."`
+	Codec          string   `json:"codec" cfg:"e,-codec:Specify which Codec will be used to encode and decode data payload to and from a connection."`
+	CodecSetting   []string `json:"codec_setting" cfg:"es,-codec-cfg:Configuration of the Codec as an array of string.\r\n\r\nThe actual configuration format of this setting is depend on the Codec of your choosing."`
 }
 
 // Init inits the configuration
@@ -144,7 +145,7 @@ func (c *ConfigProxy) VerifyCodecSetting() error {
 		return errors.New("Codec must be specified")
 	}
 
-	return c.selectedCodec.Verify([]byte(c.CodecSetting))
+	return c.selectedCodec.Verify(c.CodecSetting)
 }
 
 // Verify Verifies
@@ -186,7 +187,7 @@ func (c *ConfigProxy) Verify() error {
 	}
 
 	if c.selectedCodec.Verify != nil {
-		vErr := c.selectedCodec.Verify([]byte(c.CodecSetting))
+		vErr := c.selectedCodec.Verify(c.CodecSetting)
 
 		if vErr != nil {
 			return errors.New("Codec Setting was invalid: " + vErr.Error())
@@ -399,13 +400,18 @@ func Role() role.Registration {
 		) (role.Role, error) {
 			cfg := config.(*ConfigInput)
 
+			tTicker, tTickerErr := ticker.New(
+				300*time.Millisecond, 1024).Serve()
+
+			if tTickerErr != nil {
+				return nil, tTickerErr
+			}
+
 			listen := tcplisten.New(
 				cfg.selectedInterface,
 				cfg.Port,
-				time.Duration(cfg.InitialTimeout)*time.Second,
 				tcpconn.Wrap)
 
-			trReadTimeoutTicker := time.NewTicker(300 * time.Second)
 			clients := make([]transceiver.Client, len(cfg.Proxies))
 
 			for cIdx := range cfg.Proxies {
@@ -417,8 +423,8 @@ func Role() role.Registration {
 					time.Duration(cfg.Proxies[cIdx].RequestTimeout)*time.Second,
 					tcpconn.Wrap,
 				), cfg.Proxies[cIdx].selectedCodec.Build(
-					[]byte(cfg.Proxies[cIdx].CodecSetting),
-				), trReadTimeoutTicker.C, tclient.Config{
+					cfg.Proxies[cIdx].CodecSetting,
+				), tTicker, tclient.Config{
 					MaxConcurrent:  cfg.Proxies[cIdx].Connections,
 					RequestRetries: cfg.Proxies[cIdx].RequestRetries,
 					InitialTimeout: time.Duration(
@@ -455,7 +461,7 @@ func Role() role.Registration {
 				}
 			}
 
-			return New(trReadTimeoutTicker, clients, listen, log, Config{
+			return New(tTicker, clients, listen, log, Config{
 				Capacity: cfg.Capacity,
 				NegotiationTimeout: time.Duration(
 					cfg.InitialTimeout) * time.Second,

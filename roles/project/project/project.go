@@ -29,6 +29,7 @@ import (
 	"github.com/reinit/coward/common/fsm"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/common/timer"
 	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
@@ -36,26 +37,29 @@ import (
 )
 
 type project struct {
-	endpoint        Endpoint
-	dialer          network.Dialer
-	minWorkers      uint32
-	pingTickTimeout time.Duration
-	runner          worker.Runner
-	lastWorkID      uint64
-	startedWorkers  uint32
-	idleWorkers     uint32
-	connections     *connections
-	logger          logger.Logger
-	transceiver     transceiver.Requester
-	closeSignal     chan struct{}
-	closeWait       *sync.WaitGroup
-	closing         bool
-	lock            *sync.Mutex
+	endpoint           Endpoint
+	dialer             network.Dialer
+	minWorkers         uint32
+	pingTickTimeout    time.Duration
+	connRequestTimeout time.Duration
+	runner             worker.Runner
+	lastWorkID         uint64
+	startedWorkers     uint32
+	idleWorkers        uint32
+	connections        *connections
+	logger             logger.Logger
+	transceiver        transceiver.Requester
+	ticker             ticker.Requester
+	closeSignal        chan struct{}
+	closeWait          *sync.WaitGroup
+	closing            bool
+	lock               *sync.Mutex
 }
 
 func (p *project) persistRequest(
 	cID transceiver.ConnectionID,
 	server rw.ReadWriteDepleteDoner,
+	ctl transceiver.ConnectionControl,
 	log logger.Logger,
 ) fsm.Machine {
 	p.lock.Lock()
@@ -64,30 +68,34 @@ func (p *project) persistRequest(
 	connData := p.connections.Get(cID)
 
 	return &requester{
-		projection:            p.endpoint,
-		dialer:                p.dialer,
-		runner:                p.runner,
-		buf:                   connData.Buffer,
-		project:               p,
-		pingTickTimeout:       p.pingTickTimeout,
-		idleQuitTimeout:       p.endpoint.Timeout,
-		currentRelay:          nil,
-		pendingRelay:          false,
-		keepAliveResult:       nil,
-		keepAlivePingTicker:   connData.PingTicker,
-		keepAlivePeriodTicker: nil,
-		keepAliveTickResume:   make(chan requesterKeepAliveTickResumer, 1),
-		keepAliveQuit:         make(chan struct{}, 1),
-		rw:                    server,
-		log:                   log,
-		serverPingDelay:       0,
-		noCloseSignalToRemote: false,
+		projection:              p.endpoint,
+		dialer:                  p.dialer,
+		runner:                  p.runner,
+		buf:                     connData.Buffer,
+		project:                 p,
+		pingTickTimeout:         p.pingTickTimeout,
+		connRequestTimeout:      p.connRequestTimeout,
+		idleQuitTimeout:         p.endpoint.Timeout,
+		currentRelay:            nil,
+		pendingRelay:            false,
+		ticker:                  p.ticker,
+		noRelease:               true,
+		keepAliveResult:         nil,
+		keepAlivePingTickPermit: connData.PingTickPermit,
+		keepAliveTickResume:     make(chan requesterKeepAliveTickResumer, 1),
+		keepAliveQuit:           make(chan struct{}, 1),
+		rw:                      server,
+		connCtl:                 ctl,
+		log:                     log,
+		serverPingDelay:         0,
+		noCloseSignalToRemote:   false,
 	}
 }
 
 func (p *project) request(
 	cID transceiver.ConnectionID,
 	server rw.ReadWriteDepleteDoner,
+	ctl transceiver.ConnectionControl,
 	log logger.Logger,
 ) fsm.Machine {
 	p.lock.Lock()
@@ -96,24 +104,27 @@ func (p *project) request(
 	connData := p.connections.Get(cID)
 
 	return &requester{
-		projection:            p.endpoint,
-		dialer:                p.dialer,
-		runner:                p.runner,
-		buf:                   connData.Buffer,
-		project:               p,
-		pingTickTimeout:       p.pingTickTimeout,
-		idleQuitTimeout:       p.endpoint.Timeout,
-		currentRelay:          nil,
-		pendingRelay:          false,
-		keepAliveResult:       nil,
-		keepAlivePingTicker:   connData.PingTicker,
-		keepAlivePeriodTicker: connData.PeriodTicker,
-		keepAliveTickResume:   make(chan requesterKeepAliveTickResumer, 1),
-		keepAliveQuit:         make(chan struct{}, 1),
-		rw:                    server,
-		log:                   log,
-		serverPingDelay:       0,
-		noCloseSignalToRemote: false,
+		projection:              p.endpoint,
+		dialer:                  p.dialer,
+		runner:                  p.runner,
+		buf:                     connData.Buffer,
+		project:                 p,
+		pingTickTimeout:         p.pingTickTimeout,
+		connRequestTimeout:      p.connRequestTimeout,
+		idleQuitTimeout:         p.endpoint.Timeout,
+		currentRelay:            nil,
+		pendingRelay:            false,
+		ticker:                  p.ticker,
+		noRelease:               false,
+		keepAliveResult:         nil,
+		keepAlivePingTickPermit: connData.PingTickPermit,
+		keepAliveTickResume:     make(chan requesterKeepAliveTickResumer, 1),
+		keepAliveQuit:           make(chan struct{}, 1),
+		rw:                      server,
+		connCtl:                 ctl,
+		log:                     log,
+		serverPingDelay:         0,
+		noCloseSignalToRemote:   false,
 	}
 }
 
@@ -150,55 +161,52 @@ func (p *project) handle(
 
 			_, tReqErr := p.transceiver.Request(ll, reqBuilder, nil, m)
 
-			if tReqErr == nil {
-				skipRetrySleep = true
-
-				if retry {
+			if !retry {
+				if tReqErr == nil {
 					ll.Debugf("Completed. Connection delay %s, request "+
-						"delay %s. Restarting",
+						"delay %s.",
 						m.connection.Duration(), m.request.Duration())
-
-					continue
+				} else {
+					ll.Warningf("Can't serve due to error: %s", tReqErr)
 				}
-
-				ll.Debugf("Completed. Connection delay %s, request delay %s",
-					m.connection.Duration(), m.request.Duration())
 
 				return
 			}
 
-			if retry {
-				ll.Warningf("Can't serve due to error: %s. Restarting", tReqErr)
+			if tReqErr == nil {
+				skipRetrySleep = true
 
-				if skipRetrySleep {
-					skipRetrySleep = false
-
-					continue
-				}
-
-				retryAt := time.Now().Add(p.endpoint.RequestTimeout)
-
-				for {
-					time.Sleep(1 * time.Second)
-
-					select {
-					case <-p.closeSignal:
-						return
-
-					default:
-					}
-
-					if time.Now().After(retryAt) {
-						break
-					}
-				}
+				ll.Debugf("Completed. Connection delay %s, request "+
+					"delay %s. Restarting",
+					m.connection.Duration(), m.request.Duration())
 
 				continue
 			}
 
-			ll.Warningf("Can't serve due to error: %s", tReqErr)
+			ll.Warningf("Can't serve due to error: %s. Restarting", tReqErr)
 
-			return
+			if skipRetrySleep {
+				skipRetrySleep = false
+
+				continue
+			}
+
+			retryAt := time.Now().Add(p.endpoint.RequestTimeout)
+
+			for {
+				time.Sleep(1 * time.Second)
+
+				select {
+				case <-p.closeSignal:
+					return
+
+				default:
+				}
+
+				if time.Now().After(retryAt) {
+					break
+				}
+			}
 		}
 	}
 }

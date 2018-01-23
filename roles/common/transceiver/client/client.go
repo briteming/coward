@@ -28,6 +28,7 @@ import (
 
 	"github.com/reinit/coward/common/fsm"
 	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/common/timer"
 	"github.com/reinit/coward/roles/common/channel"
 	"github.com/reinit/coward/roles/common/network"
@@ -50,7 +51,7 @@ var (
 		"Connect request has been canceled")
 
 	ErrConnectionConnectFailed = errors.New(
-		"Failed to connect to the remote")
+		"Failed to connect to the remote Transceiver")
 
 	ErrConnectionShutdownClosing = errors.New(
 		"Connection is closing for shutdown")
@@ -68,16 +69,30 @@ var (
 		"Client already closed")
 )
 
-// virtualChannel is the data of a Virtual Channel
-type virtualChannel struct {
-	ID             transceiver.ConnectionID
-	ChannelID      channel.ID
-	Channel        connection.Virtual
-	Closed         <-chan struct{}
-	ConnClosed     <-chan struct{}
-	Requesting     chan uint32
-	IdleTimeout    time.Duration
-	InitialTimeout time.Duration
+// virtualChannelRequests
+type connectionRunningRequests struct {
+	requests uint32
+	lock     *sync.Mutex
+}
+
+// Increase increase the counter
+func (r *connectionRunningRequests) Increase() uint32 {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	r.requests++
+
+	return r.requests
+}
+
+// Decrease decrease the counter
+func (r *connectionRunningRequests) Decrease(call func(uint32)) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	r.requests--
+
+	call(r.requests)
 }
 
 // connectedConnection is the data of a Connected Connection
@@ -98,6 +113,19 @@ type connectRequest struct {
 type connectRequestResult struct {
 	ID    transceiver.ConnectionID
 	Error error
+}
+
+// virtualChannel is the data of a Virtual Channel
+type virtualChannel struct {
+	ID             transceiver.ConnectionID
+	ChannelID      channel.ID
+	Channel        connection.Virtual
+	Connection     connCtl
+	Closed         <-chan struct{}
+	CloseWait      <-chan struct{}
+	Running        *connectionRunningRequests
+	IdleTimeout    time.Duration
+	InitialTimeout time.Duration
 }
 
 // dialer is the Client Connection Dialer
@@ -126,28 +154,29 @@ func (d dialers) TotalConcurrentConnections() uint32 {
 
 // client implements transceiver.Client
 type client struct {
-	id                    transceiver.ClientID
-	log                   logger.Logger
-	dialers               []dialer
-	codec                 transceiver.CodecBuilder
-	cfg                   Config
-	bootLock              sync.Mutex
-	booted                bool
-	running               chan struct{}
-	channel               chan virtualChannel
-	totalChannels         uint32
-	maxChannels           uint32
-	connectionConnect     chan connectRequest
-	connectionConnected   chan connectedConnection
-	connectionFree        chan struct{}
-	connectionWait        sync.WaitGroup
-	connectionWorkers     uint32
-	connectionEnabled     chan struct{}
-	connectionClosing     chan struct{}
-	connectionCloserLocks []sync.Cond
-	lastConnectionID      transceiver.ConnectionID
-	requestRetries        uint8
-	requestWaitTicker     <-chan time.Time
+	id                       transceiver.ClientID
+	log                      logger.Logger
+	dialers                  []dialer
+	codec                    transceiver.CodecBuilder
+	cfg                      Config
+	bootLock                 sync.Mutex
+	booted                   bool
+	running                  chan struct{}
+	channel                  chan virtualChannel
+	totalChannels            uint32
+	maxChannels              uint32
+	connectionConnect        chan connectRequest
+	connectionConnected      chan connectedConnection
+	connectionFree           chan struct{}
+	connectionWait           sync.WaitGroup
+	connectionWorkers        uint32
+	connectionEnabled        chan struct{}
+	connectionClosing        chan struct{}
+	connectionCloserLocks    []sync.Cond
+	connectionRunningReqLock sync.Mutex
+	lastConnectionID         transceiver.ConnectionID
+	requestRetries           uint8
+	requestWaitTicker        ticker.Requester
 }
 
 // New creates a new transceiver.Client
@@ -156,7 +185,7 @@ func New(
 	log logger.Logger,
 	d network.Dialer,
 	codec transceiver.CodecBuilder,
-	requestWaitTicker <-chan time.Time,
+	requestWaitTicker ticker.Requester,
 	cfg Config,
 ) transceiver.Client {
 	dls := dialers{
@@ -193,9 +222,10 @@ func New(
 		connectionClosing:   nil,
 		connectionCloserLocks: make([]sync.Cond,
 			dls.TotalConcurrentConnections()),
-		lastConnectionID:  0,
-		requestRetries:    cfg.RequestRetries,
-		requestWaitTicker: requestWaitTicker,
+		connectionRunningReqLock: sync.Mutex{},
+		lastConnectionID:         0,
+		requestRetries:           cfg.RequestRetries,
+		requestWaitTicker:        requestWaitTicker,
 	}
 }
 
@@ -208,6 +238,9 @@ func (c *client) connect(
 	tm timer.Stopper,
 	result chan connectRequestResult,
 ) error {
+	closeNotify := make(chan struct{})
+	defer close(closeNotify)
+
 	log := l.Context(dial.String())
 	needClose := true
 
@@ -312,11 +345,11 @@ func (c *client) connect(
 		return ccErr
 	}
 
-	channelized := connection.Channelize(
-		cc, d.InitialTimeout, c.requestWaitTicker)
+	requestCounter := connectionRunningRequests{
+		requests: 0, lock: &c.connectionRunningReqLock}
 
-	connRequestingCount := make(chan uint32, 1)
-	connRequestingCount <- 0
+	channelized := connection.Channelize(cc, c.requestWaitTicker)
+	channelized.Timeout(d.InitialTimeout)
 
 	vChannels := channel.New(func(id channel.ID) fsm.Machine {
 		channelCreated++
@@ -325,9 +358,10 @@ func (c *client) connect(
 			ID:             connectionID,
 			ChannelID:      id,
 			Channel:        channelized.For(id),
+			Connection:     connCtl{connection: conn},
 			Closed:         channelized.Closed(),
-			ConnClosed:     conn.Closed(),
-			Requesting:     connRequestingCount,
+			CloseWait:      closeNotify,
+			Running:        &requestCounter,
 			IdleTimeout:    d.IdleTimeout,
 			InitialTimeout: d.InitialTimeout,
 		}
@@ -727,13 +761,13 @@ func (c *client) request(
 	cancel <-chan struct{},
 	meter transceiver.Meter,
 	log logger.Logger,
-) (bool, bool, logger.Logger, error) {
+) (<-chan struct{}, bool, bool, logger.Logger, error) {
 	ch, chRetriable, chErr := c.getConnection(cancel, meter.Connection())
 
 	if chErr != nil {
 		meter.ConnectionFailure(chErr)
 
-		return chRetriable, false, log, chErr
+		return nil, chRetriable, false, log, chErr
 	}
 
 	defer func() {
@@ -749,30 +783,33 @@ func (c *client) request(
 	).Context("Channel (" +
 		strconv.FormatUint(uint64(ch.ChannelID), 10) + ")")
 
-	meter.ConnectionFailure(nil)
-
-	connRequesting := <-ch.Requesting
-	ch.Requesting <- connRequesting + 1
+	ch.Running.Increase()
 
 	defer func() {
-		endConnRequesting := <-ch.Requesting - 1
+		ch.Running.Decrease(func(count uint32) {
+			if c.cfg.ConnectionPersistent {
+				return
+			}
 
-		if !c.cfg.ConnectionPersistent && endConnRequesting <= 0 {
+			if count > 0 {
+				return
+			}
+
 			ch.Channel.CloseAll()
-		}
-
-		ch.Requesting <- endConnRequesting
+		})
 	}()
 
 	select {
 	case <-ch.Closed:
-		return true, true, connLogger, ErrRequestSelectedChannelIsUnavailable
+		return ch.CloseWait, true, true, connLogger,
+			ErrRequestSelectedChannelIsUnavailable
 
-	case <-ch.ConnClosed:
-		return true, true, connLogger, ErrRequestSelectedChannelIsUnavailable
+	case <-ch.Connection.Closed():
+		return ch.CloseWait, true, true, connLogger,
+			ErrRequestSelectedChannelIsUnavailable
 
 	case <-c.connectionClosing:
-		return false, false, connLogger, ErrConnectionShutdownClosing
+		return nil, false, false, connLogger, ErrConnectionShutdownClosing
 
 	case c.connectionEnabled <- struct{}{}:
 		<-c.connectionEnabled
@@ -780,20 +817,25 @@ func (c *client) request(
 
 	reqTimer := meter.Request()
 
-	reqFSM := fsm.New(requestBuilder(ch.ID, ch.Channel, connLogger))
+	reqFSM := fsm.New(requestBuilder(
+		ch.ID, ch.Channel, ch.Connection, connLogger))
 
 	ch.Channel.Timeout(ch.InitialTimeout)
 
 	initErr := reqFSM.Bootup()
 
 	if initErr != nil {
+		meter.RequestFailure(initErr)
+
 		_, connErr := initErr.(connection.Error)
 
 		if connErr {
 			ch.Channel.CloseAll()
+
+			return ch.CloseWait, true, false, connLogger, initErr
 		}
 
-		return true, false, connLogger, initErr
+		return nil, true, false, connLogger, initErr
 	}
 
 	defer reqFSM.Shutdown()
@@ -813,12 +855,14 @@ func (c *client) request(
 
 		if connErr {
 			ch.Channel.CloseAll()
+
+			return ch.CloseWait, false, false, connLogger, handleErr
 		}
 
-		return false, false, connLogger, handleErr
+		return nil, false, false, connLogger, handleErr
 	}
 
-	return false, false, connLogger, nil
+	return nil, false, false, connLogger, nil
 }
 
 // Request sends request
@@ -828,6 +872,7 @@ func (c *client) Request(
 	cancel <-chan struct{},
 	meter transceiver.Meter,
 ) (bool, error) {
+	var retryWait <-chan struct{}
 	var retriable bool
 	var wontCount bool
 	var connLog logger.Logger
@@ -837,7 +882,7 @@ func (c *client) Request(
 		strconv.FormatUint(uint64(c.id), 10) + ")")
 
 	for retried := uint8(0); retried < c.requestRetries; retried++ {
-		retriable, wontCount, connLog, err = c.request(
+		retryWait, retriable, wontCount, connLog, err = c.request(
 			requestBuilder, cancel, meter, log)
 
 		if err == nil {
@@ -859,6 +904,12 @@ func (c *client) Request(
 
 		connLog.Debugf("Request has failed due to error: %s. Retrying (%d/%d)",
 			err, retried+1, c.requestRetries)
+
+		if retryWait == nil {
+			continue
+		}
+
+		<-retryWait
 	}
 
 	return retriable, err

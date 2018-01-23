@@ -21,8 +21,8 @@
 package proxy
 
 import (
-	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/command"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/transceiver"
