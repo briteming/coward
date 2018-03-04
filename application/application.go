@@ -564,8 +564,7 @@ func (c *application) execute(
 	breakLoop := false
 
 	if c.logger == nil {
-		switch strings.ToLower(config.LogFile) {
-		case "":
+		if config.LogFile == "" {
 			if config.Slient {
 				log = logger.NewDitch()
 			} else if config.Debug {
@@ -573,22 +572,7 @@ func (c *application) execute(
 			} else {
 				log = logger.NewScreenNonDebug(printer)
 			}
-
-		case "stdout":
-			if config.Debug {
-				log = logger.NewWrite(rw.NewMutexedWriter(os.Stdout))
-			} else {
-				log = logger.NewWriteNonDebug(rw.NewMutexedWriter(os.Stdout))
-			}
-
-		case "stderr":
-			if config.Debug {
-				log = logger.NewWrite(rw.NewMutexedWriter(os.Stderr))
-			} else {
-				log = logger.NewWriteNonDebug(rw.NewMutexedWriter(os.Stderr))
-			}
-
-		default:
+		} else {
 			file, fileErr := os.Create(config.LogFile)
 
 			if fileErr != nil {
