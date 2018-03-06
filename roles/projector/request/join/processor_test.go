@@ -23,6 +23,7 @@ package join
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/reinit/coward/common/fsm"
 	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/common/timer"
 	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
@@ -130,7 +132,13 @@ func (d *dummyProjectionReceiver) Remove()                   {}
 func (d *dummyProjectionReceiver) ShrinkAndRemove()          {}
 
 func testGetJoin() (*join, *dummyProjection, *dummyProjection, worker.Runner) {
-	rr, rrErr := worker.New(logger.NewDitch(), worker.Config{
+	tk, tkErr := ticker.New(300, 1024).Serve()
+
+	if tkErr != nil {
+		panic(fmt.Sprintf("Failed to create ticker due to error: %s", tkErr))
+	}
+
+	rr, rrErr := worker.New(logger.NewDitch(), tk, worker.Config{
 		MaxWorkers:        2,
 		MinWorkers:        2,
 		MaxWorkerIdle:     16 * time.Second,

@@ -25,6 +25,7 @@ import (
 
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/role"
+	"github.com/reinit/coward/common/ticker"
 	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/network/server"
@@ -45,6 +46,7 @@ type proxy struct {
 	codec           transceiver.CodecBuilder
 	mapping         common.Mapping
 	serving         network.Serving
+	ticker          ticker.RequestCloser
 	runner          worker.Runner
 	unspawnNotifier role.UnspawnNotifier
 }
@@ -65,6 +67,7 @@ func New(
 		codec:           codec,
 		mapping:         common.Mapping{},
 		serving:         nil,
+		ticker:          nil,
 		runner:          nil,
 		unspawnNotifier: nil,
 	}
@@ -83,7 +86,15 @@ func (s *proxy) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 	}
 
 	// Start Corunner
-	runner, runnerServeErr := worker.New(s.logger, worker.Config{
+	tticker, tickerErr := ticker.New(tickDelay, 1024).Serve()
+
+	if tickerErr != nil {
+		return tickerErr
+	}
+
+	s.ticker = tticker
+
+	runner, runnerServeErr := worker.New(s.logger, s.ticker, worker.Config{
 		MaxWorkers: (s.cfg.Capacity * uint32(
 			s.cfg.ConnectionChannels)) * 2,
 		MinWorkers: common.AutomaticalMinWorkerCount(
@@ -152,6 +163,19 @@ func (s *proxy) Unspawn() error {
 		}
 
 		s.runner = nil
+	}
+
+	if s.ticker != nil {
+		tickerCloseErr := s.ticker.Close()
+
+		if tickerCloseErr != nil {
+			s.logger.Errorf(
+				"Failed to close ticker due to error: %s", tickerCloseErr)
+
+			return tickerCloseErr
+		}
+
+		s.ticker = nil
 	}
 
 	s.logger.Infof("Server is closed")

@@ -100,11 +100,19 @@ func (s *projector) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		return ErrNoServerToProject
 	}
 
+	tticker, tickerErr := ticker.New(tickDelay, 1024).Serve()
+
+	if tickerErr != nil {
+		return tickerErr
+	}
+
+	s.ticker = tticker
+
 	// Start Corunner
 	startWorkers := s.cfg.GetTotalServerCapacity() +
 		((s.cfg.Capacity * uint32(s.cfg.ConnectionChannels)) * 2)
 
-	runner, runnerServeErr := worker.New(s.logger, worker.Config{
+	runner, runnerServeErr := worker.New(s.logger, s.ticker, worker.Config{
 		MaxWorkers:        startWorkers,
 		MinWorkers:        common.AutomaticalMinWorkerCount(startWorkers, 128),
 		MaxWorkerIdle:     s.cfg.IdleTimeout * 10,
@@ -114,14 +122,6 @@ func (s *projector) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 	if runnerServeErr != nil {
 		return runnerServeErr
 	}
-
-	tticker, tickerErr := ticker.New(tickDelay, 1024).Serve()
-
-	if tickerErr != nil {
-		return tickerErr
-	}
-
-	s.ticker = tticker
 
 	s.runner = runner
 
@@ -279,11 +279,6 @@ func (s *projector) Unspawn() error {
 		s.tserver = nil
 	}
 
-	if s.ticker != nil {
-		s.ticker.Close()
-		s.ticker = nil
-	}
-
 	if s.runner != nil {
 		closeErr := s.runner.Close()
 
@@ -293,6 +288,11 @@ func (s *projector) Unspawn() error {
 		}
 
 		s.runner = nil
+	}
+
+	if s.ticker != nil {
+		s.ticker.Close()
+		s.ticker = nil
 	}
 
 	s.logger.Infof("Server is closed")

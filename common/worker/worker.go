@@ -22,12 +22,13 @@ package worker
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/ticker"
 )
 
 // Errors
@@ -48,11 +49,6 @@ var (
 		"Already closed")
 )
 
-// Consts
-const (
-	idleCheckTickDelay = 600 * time.Second
-)
-
 // Workers is a Go routine manager
 type Workers interface {
 	Serve() (Runner, error)
@@ -68,75 +64,236 @@ type Runner interface {
 // Job to run
 type Job func(logger.Logger) error
 
-// job dispatch data
-type job struct {
+// workerJob dispatch data
+type workerJob struct {
 	Logger logger.Logger
 	Job    Job
 	Result chan error
 }
 
+// workerClose signal
+type workerClose struct {
+	Closed chan struct{}
+}
+
+// workerCreate request
+type workerCreate struct {
+	Created chan struct{}
+}
+
 // workers implements Workers
 type workers struct {
 	log                   logger.Logger
+	ticker                ticker.Requester
 	cfg                   Config
 	booted                bool
 	bootLock              sync.Mutex
-	job                   chan job
-	jobReceiveTicker      *time.Ticker
-	workerID              chan uint32
-	workerCount           uint32
-	idle                  chan chan bool
-	idleCheckTicker       *time.Ticker
-	idleCheckTick         <-chan time.Time
-	idleCheckChecking     chan struct{}
-	idleNextCheck         time.Time
+	job                   chan workerJob
+	create                chan workerCreate
 	idleMaxReleaseWorkers uint32
 	shutdown              chan struct{}
 	shutdownWait          sync.WaitGroup
 }
 
 // New creates a new Jobs
-func New(log logger.Logger, cfg Config) Workers {
+func New(log logger.Logger, tick ticker.Requester, cfg Config) Workers {
 	return &workers{
 		log:                   log.Context("Workers"),
+		ticker:                tick,
 		cfg:                   cfg,
 		booted:                false,
 		bootLock:              sync.Mutex{},
-		job:                   make(chan job),
-		jobReceiveTicker:      nil,
-		workerID:              make(chan uint32, 1),
-		workerCount:           0,
-		idle:                  make(chan chan bool),
-		idleCheckTicker:       nil,
-		idleCheckTick:         nil,
-		idleCheckChecking:     make(chan struct{}, 1),
-		idleNextCheck:         time.Now().Add(cfg.MaxWorkerIdle),
+		job:                   make(chan workerJob),
+		create:                make(chan workerCreate),
 		idleMaxReleaseWorkers: cfg.MinWorkers,
 		shutdown:              make(chan struct{}, 1),
 		shutdownWait:          sync.WaitGroup{},
 	}
 }
 
-// worker is a Job worker
-func (c *workers) worker(ready chan struct{}) {
-	workerID := <-c.workerID
-	workerID++
-	c.workerID <- workerID
+// maintainer create and destroy workers
+func (c *workers) maintainer(ready chan struct{}) {
+	var shutdownReceive chan struct{}
+	var createReceive chan workerCreate
+	var releaseWait ticker.Wait
 
-	workerName := "Worker (" + strconv.FormatUint(uint64(workerID), 10) + ")"
-	log := c.log.Context(workerName)
-
-	atomic.AddUint32(&c.workerCount, 1)
+	log := c.log.Context("Maintainer")
+	workingWorkers := uint32(0)
+	lastWorkerID := uint32(0)
+	maxWorkersRelease := c.cfg.MinWorkers
+	nextRelease := time.Now().Add(c.cfg.MaxWorkerIdle)
+	closeSignal := make(chan workerClose)
+	quitNotify := make(chan struct{}, c.cfg.MaxWorkers)
 
 	defer func() {
-		atomic.AddUint32(&c.workerCount, ^uint32(0))
+		if closeSignal != nil {
+			close(closeSignal)
+		}
+
+		close(quitNotify)
 
 		log.Debugf("Closed")
 
 		c.shutdownWait.Done()
 	}()
 
-	idleExit := make(chan bool)
+	releaseWaiter, releaseWaiterErr := c.ticker.Request(nextRelease)
+
+	if releaseWaiterErr != nil {
+		panic(fmt.Sprintf("Failed to initialize maintainer ticker"+
+			" due to error: %s", releaseWaiterErr))
+	}
+
+	for {
+		select {
+		case ready <- struct{}{}:
+			ready = nil
+
+			shutdownReceive = c.shutdown
+			createReceive = c.create
+			releaseWait = releaseWaiter.Wait()
+
+		case d := <-shutdownReceive:
+			shutdownReceive <- d
+
+			shutdownReceive = nil
+			createReceive = nil
+
+			releaseWait = nil
+			releaseWaiter.Close()
+
+			if workingWorkers > 0 {
+				close(closeSignal)
+				closeSignal = nil
+
+				continue
+			}
+
+			return
+
+		case cd := <-createReceive:
+			maxWorkersRelease = c.cfg.MinWorkers
+			nextRelease = time.Now().Add(c.cfg.MaxWorkerIdle)
+
+			func(cd workerCreate) {
+				defer func() {
+					cd.Created <- struct{}{}
+				}()
+
+				wCanCreate := c.cfg.MaxWorkers - workingWorkers
+
+				if wCanCreate <= 0 {
+					return
+				}
+
+				wToCreate := c.cfg.MinWorkers
+
+				if wToCreate > wCanCreate {
+					wToCreate = wCanCreate
+				}
+
+				workerReady := make(chan struct{}, 1)
+				wCreated := uint32(0)
+
+				for wCreated < wToCreate {
+					go c.worker(
+						lastWorkerID,
+						workerReady,
+						quitNotify,
+						closeSignal,
+					)
+
+					<-workerReady
+
+					lastWorkerID++
+					workingWorkers++
+					wCreated++
+				}
+
+				log.Debugf("%d Workers has been created", wCreated)
+			}(cd)
+
+		case <-quitNotify:
+			workingWorkers--
+
+			if shutdownReceive != nil {
+				continue
+			}
+
+			if workingWorkers > 0 {
+				continue
+			}
+
+			return
+
+		case <-releaseWait:
+			releaseWaiter.Close()
+
+			nextWaitTime := time.Now().Add(c.cfg.MaxWorkerIdle)
+			releaseWaiter, releaseWaiterErr = c.ticker.Request(nextWaitTime)
+
+			if releaseWaiterErr != nil {
+				panic(fmt.Sprintf("Failed to initialize maintainer ticker "+
+					"due to error: %s", releaseWaiterErr))
+			}
+
+			releaseWait = releaseWaiter.Wait()
+
+			if time.Now().Before(nextRelease) {
+				continue
+			}
+
+			nextRelease = nextWaitTime
+
+			releasedWorkers := uint32(0)
+			workerCloser := workerClose{
+				Closed: make(chan struct{}),
+			}
+			stopReleasing := false
+
+			for releasedWorkers < maxWorkersRelease && !stopReleasing {
+				select {
+				case closeSignal <- workerCloser:
+					<-workerCloser.Closed
+
+					releasedWorkers++
+
+				default:
+					stopReleasing = true
+				}
+			}
+
+			if releasedWorkers <= 0 {
+				maxWorkersRelease = c.cfg.MinWorkers
+
+				continue
+			}
+
+			maxWorkersRelease += c.cfg.MinWorkers
+
+			log.Debugf("%d Workers has been released", releasedWorkers)
+		}
+	}
+}
+
+// worker is a Job worker
+func (c *workers) worker(
+	workerID uint32,
+	ready chan struct{},
+	quitNotify chan struct{},
+	closeSignal chan workerClose,
+) {
+	var jobReceive chan workerJob
+	var closeSignalReceive chan workerClose
+
+	workerName := "Worker (" + strconv.FormatUint(uint64(workerID), 10) + ")"
+	log := c.log.Context(workerName)
+
+	defer func() {
+		quitNotify <- struct{}{}
+
+		log.Debugf("Closed")
+	}()
 
 	log.Debugf("Serving")
 
@@ -145,120 +302,22 @@ func (c *workers) worker(ready chan struct{}) {
 		case ready <- struct{}{}:
 			ready = nil
 
-		case j := <-c.job:
+			jobReceive = c.job
+			closeSignalReceive = closeSignal
+
+		case j := <-jobReceive:
 			j.Result <- j.Job(j.Logger.Context(workerName))
 
-		case d := <-c.shutdown:
-			c.shutdown <- d
-
-			return
-
-		case c.idle <- idleExit:
-			if !<-idleExit {
-				continue
+		case close, closeOK := <-closeSignalReceive:
+			if !closeOK {
+				return
 			}
 
+			close.Closed <- struct{}{}
+
 			return
-
-		case <-c.idleCheckTick:
-			select {
-			case c.idleCheckChecking <- struct{}{}:
-				func() {
-					defer func() {
-						<-c.idleCheckChecking
-					}()
-
-					if time.Now().Before(c.idleNextCheck) {
-						return
-					}
-
-					c.idleNextCheck = time.Now().Add(c.cfg.MaxWorkerIdle)
-
-					idles := make([]chan bool, c.cfg.MaxWorkers)
-					idleWorkers := uint32(0)
-
-					for idleIdx := range idles {
-						select {
-						case idleInfo := <-c.idle:
-							idles[idleIdx] = idleInfo
-							idleWorkers++
-
-						default:
-						}
-
-						break
-					}
-
-					if idleWorkers <= 0 || idleWorkers <= c.cfg.MinWorkers {
-						for idleIdx := range idles[:idleWorkers] {
-							idles[idleIdx] <- false
-						}
-
-						c.idleMaxReleaseWorkers = c.cfg.MinWorkers
-
-						return
-					}
-
-					pendingWorkers := c.cfg.MinWorkers - idleWorkers
-
-					if pendingWorkers > c.idleMaxReleaseWorkers {
-						pendingWorkers = c.idleMaxReleaseWorkers
-
-						c.idleMaxReleaseWorkers *= 2
-					}
-
-					for idleIdx := range idles[pendingWorkers:idleWorkers] {
-						idles[idleIdx] <- false
-					}
-
-					for idleIdx := range idles[0:pendingWorkers] {
-						idles[idleIdx] <- true
-					}
-
-					log.Debugf("Releasing %d Workers", pendingWorkers)
-				}()
-
-			default:
-			}
 		}
 	}
-}
-
-// createWorkers creates worker
-func (c *workers) createWorkers(num uint32) {
-	remainFreeWorkers := c.cfg.MaxWorkers - atomic.LoadUint32(&c.workerCount)
-
-	if remainFreeWorkers <= 0 {
-		return
-	}
-
-	if num > remainFreeWorkers {
-		num = remainFreeWorkers
-	}
-
-	c.idleCheckChecking <- struct{}{}
-
-	defer func() {
-		<-c.idleCheckChecking
-	}()
-
-	ready := make(chan struct{}, num)
-
-	for i := uint32(0); i < num; i++ {
-		c.shutdownWait.Add(1)
-
-		go c.worker(ready)
-	}
-
-	for range ready {
-		num--
-
-		if num <= 0 {
-			break
-		}
-	}
-
-	close(ready)
 }
 
 // Serve start serve
@@ -270,12 +329,11 @@ func (c *workers) Serve() (Runner, error) {
 		return nil, ErrAlreadyUp
 	}
 
-	c.workerID <- 0
+	c.shutdownWait.Add(1)
 
-	c.idleCheckTicker = time.NewTicker(idleCheckTickDelay)
-	c.jobReceiveTicker = time.NewTicker(c.cfg.JobReceiveTimeout)
-
-	c.createWorkers(c.cfg.MinWorkers)
+	ready := make(chan struct{}, 1)
+	go c.maintainer(ready)
+	<-ready
 
 	c.booted = true
 
@@ -291,14 +349,9 @@ func (c *workers) Close() error {
 		return ErrAlreadyDown
 	}
 
-	c.idleCheckTicker.Stop()
-	c.jobReceiveTicker.Stop()
-
 	c.shutdown <- struct{}{}
 	c.shutdownWait.Wait()
 	<-c.shutdown
-
-	<-c.workerID
 
 	c.booted = false
 
@@ -312,45 +365,53 @@ func (c *workers) Run(
 	j Job,
 	cancel <-chan struct{},
 ) (chan error, error) {
-	newJob := job{
+	newJob := workerJob{
 		Logger: l,
 		Job:    j,
 		Result: make(chan error, 1),
 	}
+
+	timeout := time.Now().Add(c.cfg.JobReceiveTimeout)
+	joinWait, joinWaitReqErr := c.ticker.Request(timeout)
+
+	if joinWaitReqErr != nil {
+		return nil, joinWaitReqErr
+	}
+
+	defer joinWait.Close()
 
 	select {
 	case c.job <- newJob:
 		return newJob.Result, nil
 
 	default:
-		c.bootLock.Lock()
-		defer c.bootLock.Unlock()
+		jobCreate := workerCreate{
+			Created: make(chan struct{}),
+		}
 
-		c.createWorkers(c.cfg.MinWorkers)
-	}
-
-	timeout := time.Now().Add(c.cfg.JobReceiveTimeout)
-
-	for {
 		select {
-		case c.job <- newJob:
-			return newJob.Result, nil
+		case c.create <- jobCreate:
+			<-jobCreate.Created
 
-		case <-cancel:
-			return nil, ErrJobJoinCanceled
-
-		case d := <-c.shutdown:
-			c.shutdown <- d
-
-			return nil, ErrJobReceiveClosed
-
-		case <-c.jobReceiveTicker.C:
-			if time.Now().Before(timeout) {
-				continue
-			}
-
+		case <-joinWait.Wait():
 			return nil, ErrJobReceiveTimedout
 		}
+	}
+
+	select {
+	case c.job <- newJob:
+		return newJob.Result, nil
+
+	case <-cancel:
+		return nil, ErrJobJoinCanceled
+
+	case d := <-c.shutdown:
+		c.shutdown <- d
+
+		return nil, ErrJobReceiveClosed
+
+	case <-joinWait.Wait():
+		return nil, ErrJobReceiveTimedout
 	}
 }
 

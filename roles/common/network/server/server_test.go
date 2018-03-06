@@ -26,8 +26,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/ticker"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 )
 
@@ -77,7 +78,15 @@ func (d *dummyAcceptor) Closed() chan struct{} {
 }
 
 func TestServerUpDown(t *testing.T) {
-	r, rErr := worker.New(logger.NewDitch(), worker.Config{
+	tk, tkErr := ticker.New(300, 1024).Serve()
+
+	if tkErr != nil {
+		t.Errorf("Failed to create ticker due to error: %s", tkErr)
+
+		return
+	}
+
+	r, rErr := worker.New(logger.NewDitch(), tk, worker.Config{
 		MaxWorkers:        1024,
 		MinWorkers:        32,
 		MaxWorkerIdle:     10 * time.Second,

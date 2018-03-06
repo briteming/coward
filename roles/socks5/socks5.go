@@ -87,7 +87,7 @@ func (s *socks5) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 	s.transceiver = trServes
 
 	// Start Corunner
-	runner, runnerServeErr := worker.New(s.log, worker.Config{
+	runner, runnerServeErr := worker.New(s.log, s.ticker, worker.Config{
 		MaxWorkers: s.cfg.Capacity * 2,
 		MinWorkers: pcommon.AutomaticalMinWorkerCount(
 			s.cfg.Capacity*2, 128),
@@ -175,11 +175,6 @@ func (s *socks5) Unspawn() error {
 		s.serverServing = nil
 	}
 
-	if s.ticker != nil {
-		s.ticker.Close()
-		s.ticker = nil
-	}
-
 	if s.runner != nil {
 		runnerCloseErr := s.runner.Close()
 
@@ -191,6 +186,11 @@ func (s *socks5) Unspawn() error {
 		}
 
 		s.runner = nil
+	}
+
+	if s.ticker != nil {
+		s.ticker.Close()
+		s.ticker = nil
 	}
 
 	s.log.Infof("Server is closed")

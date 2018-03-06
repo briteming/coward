@@ -148,7 +148,7 @@ func (s *server) Handle(
 				continue
 			}
 
-			log.Warningf("An error occurred when handling request for "+
+			log.Warningf("An error occurred when initializing request for "+
 				"Channel %d: %s", channelID, tickErr)
 		} else {
 			tickErr = machine.Tick()
@@ -163,6 +163,9 @@ func (s *server) Handle(
 				log.Warningf("An error occurred when handling request for "+
 					"Channel %d: %s. And another error also occurred "+
 					"during request shutdown: %s", channelID, tickErr, sdErr)
+			} else {
+				log.Warningf("An error occurred when handling request for "+
+					"Channel %d: %s.", channelID, tickErr)
 			}
 		}
 

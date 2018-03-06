@@ -26,8 +26,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/ticker"
+	"github.com/reinit/coward/common/worker"
 )
 
 type dummyServerConn struct {
@@ -158,7 +159,15 @@ func (d *dummyCountedBufferWrite) Write(b []byte) (int, error) {
 }
 
 func TestRelayRelay(t *testing.T) {
-	runner, runnerErr := worker.New(logger.NewDitch(), worker.Config{
+	tk, tkErr := ticker.New(300, 1024).Serve()
+
+	if tkErr != nil {
+		t.Errorf("Failed to create ticker due to error: %s", tkErr)
+
+		return
+	}
+
+	runner, runnerErr := worker.New(logger.NewDitch(), tk, worker.Config{
 		MaxWorkers:        64,
 		MinWorkers:        64,
 		MaxWorkerIdle:     5 * time.Minute,

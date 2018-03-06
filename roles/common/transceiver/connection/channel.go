@@ -358,11 +358,7 @@ func (c *channel) Deplete() error {
 
 // Done finish use of current Virtual Channel
 func (c *channel) Done() error {
-	var err error
-
-	if !c.Depleted() {
-		err = c.Deplete()
-	}
+	err := c.Deplete()
 
 	if c.currentReader.Connection != nil {
 		c.currentReader.Connection = nil
@@ -410,10 +406,16 @@ func (c *channel) Read(b []byte) (int, error) {
 	}
 
 	bufLen := len(b)
-	maxReadLen := int(c.currentReader.Length)
 
-	if maxReadLen > bufLen {
-		maxReadLen = bufLen
+	if bufLen > math.MaxUint16 {
+		bufLen = math.MaxUint16
+	}
+
+	maxBufLen := uint16(bufLen)
+	maxReadLen := c.currentReader.Length
+
+	if maxReadLen > maxBufLen {
+		maxReadLen = maxBufLen
 	}
 
 	rLen, rErr := c.currentReader.Connection.Read(b[:maxReadLen])

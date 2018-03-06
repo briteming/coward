@@ -25,10 +25,19 @@ import (
 	"time"
 
 	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/ticker"
 )
 
 func TestJobServeClose(t *testing.T) {
-	c := New(logger.NewDitch(), Config{
+	tk, tkErr := ticker.New(300*time.Millisecond, 16).Serve()
+
+	if tkErr != nil {
+		t.Errorf("Failed to create ticker due to error: %s", tkErr)
+
+		return
+	}
+
+	c := New(logger.NewDitch(), tk, Config{
 		MaxWorkers:        64,
 		MinWorkers:        16,
 		MaxWorkerIdle:     1 * time.Second,
@@ -71,7 +80,15 @@ func TestJobServeClose(t *testing.T) {
 }
 
 func TestJobServeRunWaitClose(t *testing.T) {
-	c := New(logger.NewDitch(), Config{
+	tk, tkErr := ticker.New(300*time.Millisecond, 16).Serve()
+
+	if tkErr != nil {
+		t.Errorf("Failed to create ticker due to error: %s", tkErr)
+
+		return
+	}
+
+	c := New(logger.NewDitch(), tk, Config{
 		MaxWorkers:        64,
 		MinWorkers:        16,
 		MaxWorkerIdle:     1 * time.Second,

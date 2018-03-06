@@ -102,7 +102,7 @@ func (s *projectile) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 	s.ticker = tticker
 
 	// Start Corunner
-	runner, runnerServeErr := worker.New(s.logger, worker.Config{
+	runner, runnerServeErr := worker.New(s.logger, s.ticker, worker.Config{
 		MaxWorkers: s.cfg.Endpoints.TotalConnections() * 2,
 		MinWorkers: pcommon.AutomaticalMinWorkerCount(
 			s.cfg.Endpoints.TotalConnections()*2, 128),
@@ -231,11 +231,6 @@ func (s *projectile) Unspawn() error {
 		s.projects = nil
 	}
 
-	if s.ticker != nil {
-		s.ticker.Close()
-		s.ticker = nil
-	}
-
 	if s.runner != nil {
 		cErr := s.runner.Close()
 
@@ -246,6 +241,11 @@ func (s *projectile) Unspawn() error {
 		}
 
 		s.runner = nil
+	}
+
+	if s.ticker != nil {
+		s.ticker.Close()
+		s.ticker = nil
 	}
 
 	s.unspawnNotifier <- struct{}{}

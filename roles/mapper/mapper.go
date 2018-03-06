@@ -123,7 +123,7 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 	s.transceiver = trServe
 
 	// Init runners
-	runner, runnerServeErr := worker.New(s.log, worker.Config{
+	runner, runnerServeErr := worker.New(s.log, s.ticker, worker.Config{
 		MaxWorkers: s.cfg.Mapping.TotalCapacity() * 2,
 		MinWorkers: pcommon.AutomaticalMinWorkerCount(
 			s.cfg.Mapping.TotalCapacity()*2, 128),
@@ -251,12 +251,6 @@ func (s *mapper) Unspawn() error {
 		s.servers[sIdx] = nil
 	}
 
-	// Ticker down
-	if s.ticker == nil {
-		s.ticker.Close()
-		s.ticker = nil
-	}
-
 	// Close runner at last
 	if s.runner != nil {
 		runnerErr := s.runner.Close()
@@ -264,6 +258,12 @@ func (s *mapper) Unspawn() error {
 		if runnerErr != nil {
 			return runnerErr
 		}
+	}
+
+	// Ticker down
+	if s.ticker == nil {
+		s.ticker.Close()
+		s.ticker = nil
 	}
 
 	s.log.Infof("Server is closed")

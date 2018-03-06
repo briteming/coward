@@ -40,14 +40,14 @@ type server struct {
 }
 
 func (c server) waitForRespond(expecting Signal) error {
+	defer c.ReadWriteDepleteDoner.Done()
+
 	command := [1]byte{}
 
 	for {
 		_, crErr := io.ReadFull(c.ReadWriteDepleteDoner, command[:])
 
 		if crErr != nil {
-			c.ReadWriteDepleteDoner.Done()
-
 			return crErr
 		}
 
@@ -57,12 +57,8 @@ func (c server) waitForRespond(expecting Signal) error {
 			continue
 		}
 
-		c.ReadWriteDepleteDoner.Done()
-
-		break
+		return nil
 	}
-
-	return nil
 }
 
 // SendSignalWaitRespond sends a Relay Signal, and wait until expected respond

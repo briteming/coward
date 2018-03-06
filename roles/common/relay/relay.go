@@ -23,6 +23,7 @@ package relay
 import (
 	"errors"
 	"io"
+	"sync"
 
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
@@ -41,7 +42,7 @@ var (
 		"Closing an inactive Relay")
 
 	ErrServerConnIsDown = errors.New(
-		"Server connection is closed")
+		"Relay connection is closed")
 )
 
 // Signal represents a Relay Signal
@@ -71,19 +72,19 @@ type Client interface {
 
 // relay implements Relay
 type relay struct {
-	logger                   logger.Logger
-	runner                   worker.Runner
-	server                   rw.ReadWriteDepleteDoner
-	serverBuffer             []byte
-	clientBuilder            Client
-	clientBuffer             []byte
-	serverConnIsDown         bool
-	clientResultChan         <-chan error
-	clientIsDown             bool
-	initiativeClientDownSync chan struct{}
-	clientEnabled            chan io.ReadWriteCloser
-	clientSkipWrite          bool
-	running                  bool
+	logger                               logger.Logger
+	runner                               worker.Runner
+	server                               rw.ReadWriteDepleteDoner
+	serverBuffer                         []byte
+	clientBuilder                        Client
+	clientBuffer                         []byte
+	serverConnIsDown                     bool
+	clientResultChan                     <-chan error
+	clientIsDown                         bool
+	initiativeClientDownSyncDisabled     bool
+	initiativeClientDownSyncDisabledLock sync.Mutex
+	clientEnabled                        chan io.ReadWriteCloser
+	running                              bool
 }
 
 // New creates a new Relay
@@ -96,19 +97,19 @@ func New(
 	clientBuffer []byte,
 ) Relay {
 	return &relay{
-		logger:                   log.Context("Relay"),
-		runner:                   runner,
-		server:                   server,
-		serverBuffer:             serverBuffer,
-		clientBuilder:            clientBuilder,
-		clientBuffer:             clientBuffer,
-		serverConnIsDown:         false,
-		clientResultChan:         nil,
-		clientIsDown:             false,
-		initiativeClientDownSync: make(chan struct{}, 1),
-		clientEnabled:            make(chan io.ReadWriteCloser, 1),
-		clientSkipWrite:          false,
-		running:                  false,
+		logger:                               log.Context("Relay"),
+		runner:                               runner,
+		server:                               server,
+		serverBuffer:                         serverBuffer,
+		clientBuilder:                        clientBuilder,
+		clientBuffer:                         clientBuffer,
+		serverConnIsDown:                     false,
+		clientResultChan:                     nil,
+		clientIsDown:                         false,
+		initiativeClientDownSyncDisabled:     false,
+		initiativeClientDownSyncDisabledLock: sync.Mutex{},
+		clientEnabled:                        make(chan io.ReadWriteCloser, 1),
+		running:                              false,
 	}
 }
 
@@ -147,8 +148,24 @@ func (r *relay) Bootup(cancel <-chan struct{}) error {
 	return runErr
 }
 
+// disableInitiativeClientDownSync disables Initiative ClientDown Sync signal
+// from been sent and returns whether or not it's current call actually disables
+// it (in opponent to it's already been disabled by previous calls)
+func (r *relay) disableInitiativeClientDownSync() bool {
+	r.initiativeClientDownSyncDisabledLock.Lock()
+	defer r.initiativeClientDownSyncDisabledLock.Unlock()
+
+	if r.initiativeClientDownSyncDisabled {
+		return false
+	}
+
+	r.initiativeClientDownSyncDisabled = true
+
+	return true
+}
+
 // clientReceiver receives data from the client and send them to
-// the another relay
+// remote relay
 func (r *relay) clientReceiver(l logger.Logger) error {
 	client, clientErr := r.clientBuilder.Client(r.logger, server{
 		ReadWriteDepleteDoner: r.server,
@@ -177,21 +194,45 @@ func (r *relay) clientReceiver(l logger.Logger) error {
 			continue
 		}
 
-		select {
-		case r.initiativeClientDownSync <- struct{}{}:
-			r.clientBuffer[0] = byte(SignalCompleted)
-
-			_, wErr := rw.WriteFull(r.server, r.clientBuffer[:rLen+1])
-
-			if wErr != nil {
-				return wErr
-			}
-
+		if !r.disableInitiativeClientDownSync() {
 			return rErr
+		}
 
-		default:
+		r.clientBuffer[0] = byte(SignalCompleted)
+
+		_, wErr := rw.WriteFull(r.server, r.clientBuffer[:rLen+1])
+
+		if wErr != nil {
+			return wErr
+		}
+
+		return rErr
+	}
+}
+
+// serverReceiver receives data from remote relay and send them to
+// the client
+func (r *relay) serverReceiver(cil io.ReadWriteCloser) error {
+	defer r.server.Done()
+
+	for {
+		if r.server.Depleted() {
 			return nil
 		}
+
+		rLen, rErr := r.server.Read(r.serverBuffer[:])
+
+		if rErr != nil {
+			r.serverConnIsDown = true
+
+			return rErr
+		}
+
+		if cil == nil {
+			continue
+		}
+
+		rw.WriteFull(cil, r.serverBuffer[:rLen])
 	}
 }
 
@@ -211,9 +252,13 @@ func (r *relay) Tick() error {
 		case cil = <-r.clientEnabled:
 			r.clientEnabled <- cil
 
-		case <-r.clientResultChan:
+		case clientCloseErr := <-r.clientResultChan:
 			r.clientIsDown = true
-			r.clientSkipWrite = true
+
+			if clientCloseErr != nil {
+				r.logger.Debugf("Relay Client exited early due to "+
+					"error: %s", clientCloseErr)
+			}
 		}
 	}
 
@@ -232,48 +277,23 @@ func (r *relay) Tick() error {
 		return crErr
 	}
 
-	signalID := r.serverBuffer[0]
-
-	for {
-		if r.server.Depleted() {
-			break
-		}
-
-		rLen, rErr := r.server.Read(r.serverBuffer[:])
-
-		if rErr != nil {
-			r.serverConnIsDown = true
-			r.server.Done()
-
-			return rErr
-		}
-
-		if r.clientSkipWrite {
-			continue
-		}
-
-		rw.WriteFull(cil, r.serverBuffer[:rLen])
-	}
-
-	r.server.Done()
-
-	switch Signal(signalID) {
+	switch Signal(r.serverBuffer[0]) {
 	case SignalData:
-		return nil //tickErr
+		return r.serverReceiver(cil)
 
 	case SignalCompleted: // Remote initialized shutdown and waiting for comfirm
-		select {
-		case r.initiativeClientDownSync <- struct{}{}:
-			// Must Close (so .clientReceiver can be closed too) first, so we
-			// can ensure that no data will be send to opponent relay after
-			// SignalClose is dispatched
-			rCloseErr := r.Close()
+		sendErr := r.serverReceiver(cil)
+
+		if sendErr != nil {
+			return sendErr
+		}
+
+		if r.disableInitiativeClientDownSync() {
+			rCloseErr := r.close(false)
 
 			if rCloseErr != nil {
 				return rCloseErr
 			}
-
-		default:
 		}
 
 		_, wErr := rw.WriteFull(r.server, []byte{byte(SignalClose)})
@@ -283,44 +303,56 @@ func (r *relay) Tick() error {
 	case SignalError: // Remote relay encountered an error and already closed
 		fallthrough
 	case SignalClose: // Remote has comfirmed shutdown
-		select {
-		case r.initiativeClientDownSync <- struct{}{}:
-		default:
+		sendErr := r.serverReceiver(cil)
+
+		if sendErr != nil {
+			return sendErr
 		}
 
-		return r.Close()
+		// Disable InitiativeClientDownSync before close the relay, otherwise
+		// we may end up sending SignalCompleted to the remote relay while
+		// unable to respond it correctly
+		r.disableInitiativeClientDownSync()
+
+		return r.close(false)
 
 	default:
 		return ErrUnknownSignal
 	}
 }
 
-func (r *relay) close() error {
+// release releases current relay
+func (r *relay) release(sendInitiativeClientDownSync bool) error {
 	needSendCloseSync := false
 
-	select {
-	case r.initiativeClientDownSync <- struct{}{}:
+	// Try disable InitiativeClientDownSync signal before we actually going
+	// to close clientReceiver and only actually send InitiativeClientDownSync
+	// when making sure that's us who disabled InitiativeClientDownSync
+	// When InitiativeClientDownSync already been disabled however, don't send
+	// anything because we're unable to making correct respond here
+	if sendInitiativeClientDownSync && !r.disableInitiativeClientDownSync() {
 		needSendCloseSync = true
-
-	default:
 	}
 
 	if !r.clientIsDown {
 		select {
-		case <-r.clientResultChan:
-			r.clientIsDown = true
-			r.clientSkipWrite = true
+		case clientCloseErr := <-r.clientResultChan:
+			if clientCloseErr != nil {
+				r.logger.Debugf("Relay Client has been shutdown with "+
+					"error: %s", clientCloseErr)
+			}
 
 		case cil := <-r.clientEnabled:
 			r.clientEnabled <- cil
 
 			cil.Close()
 
-			<-r.clientResultChan
+			<-r.clientResultChan // Should be an EOF error
 		}
+
+		r.clientIsDown = true
 	}
 
-	close(r.initiativeClientDownSync)
 	close(r.clientEnabled)
 
 	if !needSendCloseSync || r.serverConnIsDown {
@@ -329,11 +361,18 @@ func (r *relay) close() error {
 
 	_, wErr := rw.WriteFull(r.server, []byte{byte(SignalClose)})
 
-	if wErr != nil {
-		return wErr
+	return wErr
+}
+
+// close close current relay
+func (r *relay) close(sendInitiativeClientDownSync bool) error {
+	if !r.running {
+		return ErrClosingInactiveRelay
 	}
 
-	return nil
+	r.running = false
+
+	return r.release(sendInitiativeClientDownSync)
 }
 
 // Close shutdown the relay
@@ -343,11 +382,5 @@ func (r *relay) close() error {
 // DO NOT call close manually unless it's for droping parent's (r.server)
 // connection.
 func (r *relay) Close() error {
-	if !r.running {
-		return ErrClosingInactiveRelay
-	}
-
-	r.running = false
-
-	return r.close()
+	return r.close(true)
 }
