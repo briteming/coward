@@ -62,12 +62,12 @@ after_success:
 # - Compile to binary
 # - Add few info file
 before_deploy:
-    - if [[ "$TRAVIS_TAG" =~ ^[0-9][0-9.]+\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then mkdir ./.dist && mkdir ./.dist_tmp && mkdir ./.dist_tmp/src; fi
-    - if [[ "$TRAVIS_TAG" =~ ^[0-9][0-9.]+\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then find . -maxdepth 1 \( -type f -o -type d \) ! -name ".*" -exec cp -r {} ./.dist_tmp/src/ \;; fi
+    - if [[ "$TRAVIS_TAG" =~ ^[0-9][0-9.]+\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then mkdir ./.dist && mkdir ./.dist_tmp && mkdir "./.dist_tmp/src-$TRAVIS_TAG"; fi
+    - if [[ "$TRAVIS_TAG" =~ ^[0-9][0-9.]+\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then find . -maxdepth 1 \( -type f -o -type d \) ! -name ".*" -exec cp -r {} "./.dist_tmp/src-$TRAVIS_TAG" \;; fi
     - if [[ "$TRAVIS_TAG" =~ ^[0-9][0-9.]+\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then CGO_ENABLED=0 gox -ldflags "-s -w -X $VERSION_VARIABLE=$(git describe --always --long --dirty --tags)" -osarch "$BUILD_TARGETS" -output "./.dist_tmp/{{.Dir}}_{{.OS}}_{{.Arch}}"; fi
     - if [[ "$TRAVIS_TAG" =~ ^[0-9][0-9.]+\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then (cd ./.dist_tmp && find . -maxdepth 1 -type f ! -name "SUM.*" -exec sha1sum {} \; > SUM.sha1); fi
     - if [[ "$TRAVIS_TAG" =~ ^[0-9][0-9.]+\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then (cd ./.dist_tmp && find . -maxdepth 1 -type f ! -name "SUM.*" -exec sha512sum {} \; > SUM.sha512); fi
-    - if [[ "$TRAVIS_TAG" =~ ^[0-9][0-9.]+\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then find ./.dist_tmp/src -maxdepth 1 -type f -name "[[:upper:]]*" -exec mv {} ./.dist_tmp \;; fi
+    - if [[ "$TRAVIS_TAG" =~ ^[0-9][0-9.]+\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then find "./.dist_tmp/src-$TRAVIS_TAG" -maxdepth 1 -type f -name "[[:upper:]]*" -exec mv {} ./.dist_tmp \;; fi
     - if [[ "$TRAVIS_TAG" =~ ^[0-9][0-9.]+\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then (cd ./.dist_tmp && tar -zcvf "../.dist/COWARD-$TRAVIS_TAG.tar.gz" *); fi
     - if [[ "$TRAVIS_TAG" =~ ^[0-9][0-9.]+\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then echo "$(git show $TRAVIS_TAG --show-signature --shortstat)" > ./.dist/Updates; fi
     - if [[ "$TRAVIS_TAG" =~ ^[0-9][0-9.]+\-release$ && "$GITHUB_USER" != "" && "$GITHUB_TOKEN" != "" ]]; then (cd ./.dist && find . -type f ! -name "SUM.*" -exec sha1sum {} \; > SUM.sha1 && echo "SHA1 checksum:" && cat SUM.sha1); fi

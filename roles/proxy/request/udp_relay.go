@@ -60,11 +60,7 @@ func (u *udpRelay) Initialize(l logger.Logger, server relay.Server) error {
 
 func (u *udpRelay) Client(
 	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
-	listener, listenErr := net.ListenUDP("udp", &net.UDPAddr{
-		IP:   u.listenIP,
-		Port: 0,
-		Zone: "",
-	})
+	listener, listenErr := net.ListenUDP("udp", nil)
 
 	if listenErr != nil {
 		server.Write([]byte{UDPRespondFailedToListen})

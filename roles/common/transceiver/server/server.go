@@ -165,7 +165,7 @@ func (s *server) Handle(
 					"during request shutdown: %s", channelID, tickErr, sdErr)
 			} else {
 				log.Warningf("An error occurred when handling request for "+
-					"Channel %d: %s.", channelID, tickErr)
+					"Channel %d: %s", channelID, tickErr)
 			}
 		}
 

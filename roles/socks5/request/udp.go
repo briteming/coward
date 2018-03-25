@@ -55,7 +55,7 @@ func UDP(
 		connCtl transceiver.ConnectionControl,
 		log logger.Logger,
 	) fsm.Machine {
-		return &udp{
+		return udp{
 			log: log,
 			relay: relay.New(
 				log, runner, conn, shb.For(cID).Select(id), &udpRelay{

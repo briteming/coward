@@ -24,6 +24,7 @@ import (
 	"errors"
 	"math"
 	"net"
+	"sync"
 
 	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/network"
@@ -56,6 +57,7 @@ type udpConn struct {
 	accConnCloseResult chan error
 	allowedIP          net.IP
 	client             *net.UDPAddr
+	closeLock          sync.Mutex
 }
 
 func (c *udpConn) Read(b []byte) (int, error) {
@@ -194,9 +196,15 @@ func (c *udpConn) Write(b []byte) (int, error) {
 }
 
 func (c *udpConn) Close() error {
+	c.closeLock.Lock()
+	defer c.closeLock.Unlock()
+
 	c.accConn.Close()
 
-	<-c.accConnCloseResult
+	if c.accConnCloseResult != nil {
+		<-c.accConnCloseResult
+		c.accConnCloseResult = nil
+	}
 
 	return c.UDPConn.Close()
 }

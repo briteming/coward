@@ -24,11 +24,12 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync"
 	"time"
 
-	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/relay"
 	"github.com/reinit/coward/roles/proxy/request"
@@ -134,6 +135,7 @@ func (u *udpRelay) Initialize(l logger.Logger, server relay.Server) error {
 		accConn:            u.client,
 		accConnCloseResult: runnerCloseResult,
 		client:             nil,
+		closeLock:          sync.Mutex{},
 	}
 
 	// Now ask server to open a port for us

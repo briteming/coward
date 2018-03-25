@@ -179,6 +179,10 @@ func (r *relay) clientReceiver(l logger.Logger) error {
 
 	r.clientEnabled <- client
 
+	defer func() {
+		<-r.clientEnabled
+	}()
+
 	r.clientBuffer[0] = byte(SignalData)
 
 	for {
@@ -277,7 +281,9 @@ func (r *relay) Tick() error {
 		return crErr
 	}
 
-	switch Signal(r.serverBuffer[0]) {
+	signal := Signal(r.serverBuffer[0])
+
+	switch signal {
 	case SignalData:
 		return r.serverReceiver(cil)
 
@@ -317,6 +323,8 @@ func (r *relay) Tick() error {
 		return r.close(false)
 
 	default:
+		r.logger.Warningf("Received an unknown Relay Signal \"%d\"", signal)
+
 		return ErrUnknownSignal
 	}
 }
@@ -325,12 +333,7 @@ func (r *relay) Tick() error {
 func (r *relay) release(sendInitiativeClientDownSync bool) error {
 	needSendCloseSync := false
 
-	// Try disable InitiativeClientDownSync signal before we actually going
-	// to close clientReceiver and only actually send InitiativeClientDownSync
-	// when making sure that's us who disabled InitiativeClientDownSync
-	// When InitiativeClientDownSync already been disabled however, don't send
-	// anything because we're unable to making correct respond here
-	if sendInitiativeClientDownSync && !r.disableInitiativeClientDownSync() {
+	if sendInitiativeClientDownSync && r.disableInitiativeClientDownSync() {
 		needSendCloseSync = true
 	}
 
