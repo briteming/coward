@@ -25,9 +25,9 @@ import (
 	"net"
 
 	"github.com/reinit/coward/common/fsm"
-	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/command"
 	"github.com/reinit/coward/roles/common/relay"
 )
@@ -63,7 +63,6 @@ var (
 
 // UDP Request
 type UDP struct {
-	Logger    logger.Logger
 	Runner    worker.Runner
 	Buffer    []byte
 	Cancel    <-chan struct{}
@@ -84,12 +83,12 @@ func (c UDP) ID() command.ID {
 }
 
 // New creates a new request context
-func (c UDP) New(rw rw.ReadWriteDepleteDoner) fsm.Machine {
+func (c UDP) New(rw rw.ReadWriteDepleteDoner, log logger.Logger) fsm.Machine {
 	return udp{
 		runner: c.Runner,
 		cancel: c.Cancel,
 		rw:     rw,
-		relay: relay.New(c.Logger, c.Runner, rw, c.Buffer, &udpRelay{
+		relay: relay.New(log, c.Runner, rw, c.Buffer, &udpRelay{
 			localAddr: c.LocalAddr,
 			listenIP:  nil,
 		}, make([]byte, 4096)),

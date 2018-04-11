@@ -115,7 +115,7 @@ func (s *projector) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 	runner, runnerServeErr := worker.New(s.logger, s.ticker, worker.Config{
 		MaxWorkers:        startWorkers,
 		MinWorkers:        common.AutomaticalMinWorkerCount(startWorkers, 128),
-		MaxWorkerIdle:     s.cfg.IdleTimeout * 10,
+		MaxWorkerIdle:     s.cfg.IdleTimeout * 2,
 		JobReceiveTimeout: s.cfg.InitialTimeout,
 	}).Serve()
 

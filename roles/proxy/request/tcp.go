@@ -25,9 +25,9 @@ import (
 	"time"
 
 	"github.com/reinit/coward/common/fsm"
-	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/command"
 	"github.com/reinit/coward/roles/common/relay"
 )
@@ -80,7 +80,7 @@ func (c TCP) ID() command.ID {
 }
 
 // New creates a new request context
-func (c TCP) New(rw rw.ReadWriteDepleteDoner) fsm.Machine {
+func (c TCP) New(rw rw.ReadWriteDepleteDoner, log logger.Logger) fsm.Machine {
 	panic("`New` must be overrided")
 }
 

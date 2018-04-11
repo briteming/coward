@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/reinit/coward/common/fsm"
+	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/command"
 	tcpconn "github.com/reinit/coward/roles/common/network/connection/tcp"
@@ -48,10 +49,10 @@ func (c TCPIPv6) ID() command.ID {
 }
 
 // New creates a new request context
-func (c TCPIPv6) New(rw rw.ReadWriteDepleteDoner) fsm.Machine {
+func (c TCPIPv6) New(rw rw.ReadWriteDepleteDoner, l logger.Logger) fsm.Machine {
 	return &tcpIPv4{
 		tcp: tcp{
-			logger:            c.Logger,
+			logger:            l,
 			buf:               c.Buffer,
 			dialTimeout:       c.DialTimeout,
 			connectionTimeout: c.ConnectionTimeout,
@@ -89,7 +90,7 @@ func (c *tcpIPv6) Bootup() (fsm.State, error) {
 	timeout := time.Duration(c.buf[18]) * time.Second
 
 	if timeout <= 0 {
-		c.rw.Write([]byte{TCPRespondBadRequest})
+		rw.WriteFull(c.rw, []byte{TCPRespondBadRequest})
 
 		return nil, ErrTCPInvalidTimeout
 	}

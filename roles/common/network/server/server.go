@@ -213,10 +213,9 @@ func (s *server) acceptor() {
 				}
 
 			default:
+				log.Debugf("Client \"%s\" is disconnected",
+					cl.Connection.RemoteAddr())
 			}
-
-			log.Debugf("Client \"%s\" is disconnected",
-				cl.Connection.RemoteAddr())
 
 			if !closing {
 				continue

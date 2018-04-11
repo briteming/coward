@@ -21,43 +21,20 @@
 package connection
 
 import (
-	"io"
-
-	"github.com/reinit/coward/roles/common/network"
+	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/transceiver"
 )
-
-// codec implements io.ReadWriter
-type codec struct {
-	network.Connection
-
-	codec io.ReadWriter
-}
 
 // Codec creates a io.ReadWriter for encode and decode data from
 // given network.Connection
 func Codec(
-	conn network.Connection,
 	cc transceiver.CodecBuilder,
-) (network.Connection, error) {
-	ccc, ccErr := cc(conn)
+) (rw.Codec, error) {
+	ccc, ccErr := cc()
 
 	if ccErr != nil {
 		return nil, ccErr
 	}
 
-	return codec{
-		Connection: conn,
-		codec:      ccc,
-	}, nil
-}
-
-// Read read data from codec
-func (c codec) Read(b []byte) (int, error) {
-	return c.codec.Read(b)
-}
-
-// Write write data to codec
-func (c codec) Write(b []byte) (int, error) {
-	return c.codec.Write(b)
+	return ccc, nil
 }

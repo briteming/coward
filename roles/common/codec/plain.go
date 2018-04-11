@@ -21,11 +21,8 @@
 package codec
 
 import (
-	"fmt"
-	"io"
-
+	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/codec/plain"
-	"github.com/reinit/coward/roles/common/codec/prefixer"
 	"github.com/reinit/coward/roles/common/transceiver"
 )
 
@@ -55,37 +52,12 @@ func Plain() transceiver.Codec {
 	}
 }
 
-// PlainQoS return a prefixable Plain Transceiver Codec for better QoS
-// compatibility
-func PlainQoS() transceiver.Codec {
-	return transceiver.Codec{
-		Name:   "plain-q",
-		Usage:  "QoS Prefixer configuration is required",
-		Build:  plainPrefixBuilder,
-		Verify: plainPrefixVerifier,
-	}
-}
-
 func plainVerifier(configuration []string) error {
 	return nil
 }
 
 func plainBuilder(configuration []string) transceiver.CodecBuilder {
-	return func(conn io.ReadWriter) (io.ReadWriter, error) {
-		return plain.New(conn)
-	}
-}
-
-func plainPrefixVerifier(configuration []string) error {
-	return prefixerSettingVerifier(configuration, nil, plainPrefixerOptions,
-		fmt.Errorf(plainPrefixerUsageErr, plainPrefixerOptions))
-}
-
-func plainPrefixBuilder(configuration []string) transceiver.CodecBuilder {
-	prefixerCfg := prefixerSettingBuilder(configuration, plainPrefixerOptions)
-
-	return func(conn io.ReadWriter) (io.ReadWriter, error) {
-		return plain.New(prefixer.New(conn,
-			prefixerCfg["request-prefix"], prefixerCfg["respond-prefix"]))
+	return func() (rw.Codec, error) {
+		return plain.New()
 	}
 }

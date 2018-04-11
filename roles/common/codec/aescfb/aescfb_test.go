@@ -48,7 +48,7 @@ func (d dummyMark) Mark(marker.Mark) error {
 	return nil
 }
 
-func TestAESCFB(t *testing.T) {
+func TestAESCFB1(t *testing.T) {
 	k := dummyKey{
 		Key: make([]byte, 64),
 	}
@@ -63,7 +63,64 @@ func TestAESCFB(t *testing.T) {
 
 	buf := bytes.NewBuffer(make([]byte, 0, 512))
 
-	codec, codecErr := AESCFB(buf, k, 32, dummyMark{}, &sync.Mutex{})
+	codec, codecErr := AESCFB(k, 32, dummyMark{}, &sync.Mutex{})
+
+	if codecErr != nil {
+		t.Error("Failed to initialize codec:", codecErr)
+
+		return
+	}
+
+	_, wErr := codec.Encode(buf).Write([]byte("Hello World!"))
+
+	if wErr != nil {
+		t.Error("Write has failed:", wErr)
+
+		return
+	}
+
+	_, wErr = codec.Encode(buf).Write([]byte("Welcome!"))
+
+	if wErr != nil {
+		t.Error("Write has failed:", wErr)
+
+		return
+	}
+
+	newBuf := make([]byte, 20)
+
+	_, rErr = io.ReadFull(codec.Decode(buf), newBuf)
+
+	if rErr != nil {
+		t.Error("Read has failed:", rErr)
+
+		return
+	}
+
+	if !bytes.Equal(newBuf, []byte("Hello World!Welcome!")) {
+		t.Errorf("Failed to write/read expected data. Expected to read %d, got %d",
+			[]byte("Hello World!Welcome!"), newBuf)
+
+		return
+	}
+}
+
+func TestAESCFB2(t *testing.T) {
+	k := dummyKey{
+		Key: make([]byte, 64),
+	}
+
+	_, rErr := rand.Read(k.Key)
+
+	if rErr != nil {
+		t.Error("Failed to generate random key:", rErr)
+
+		return
+	}
+
+	buf := bytes.NewBuffer(make([]byte, 0, 512))
+
+	codec, codecErr := AESCFB(k, 32, dummyMark{}, &sync.Mutex{})
 
 	if codecErr != nil {
 		t.Error("Failed to initialize codec:", codecErr)
@@ -85,7 +142,7 @@ func TestAESCFB(t *testing.T) {
 
 	copy(expected, testData)
 
-	wLen, wErr := codec.Write(testData)
+	wLen, wErr := codec.Encode(buf).Write(testData)
 
 	if wErr != nil {
 		t.Error("Failed to write data:", wErr)
@@ -102,7 +159,7 @@ func TestAESCFB(t *testing.T) {
 
 	resultData := make([]byte, len(testData))
 
-	rLen, rErr := io.ReadFull(codec, resultData)
+	rLen, rErr := io.ReadFull(codec.Decode(buf), resultData)
 
 	if rErr != nil {
 		t.Error("Failed to read data:", rErr)

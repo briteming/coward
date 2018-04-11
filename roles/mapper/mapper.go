@@ -127,7 +127,7 @@ func (s *mapper) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		MaxWorkers: s.cfg.Mapping.TotalCapacity() * 2,
 		MinWorkers: pcommon.AutomaticalMinWorkerCount(
 			s.cfg.Mapping.TotalCapacity()*2, 128),
-		MaxWorkerIdle:     s.cfg.TransceiverIdleTimeout * 10,
+		MaxWorkerIdle:     s.cfg.TransceiverIdleTimeout * 2,
 		JobReceiveTimeout: s.cfg.TransceiverInitialTimeout,
 	}).Serve()
 

@@ -20,10 +20,12 @@
 
 package transceiver
 
-import "io"
+import (
+	"github.com/reinit/coward/common/rw"
+)
 
 // CodecBuilder creates a new Codec
-type CodecBuilder func(io.ReadWriter) (io.ReadWriter, error)
+type CodecBuilder func() (rw.Codec, error)
 
 // Codec is the registeration information of a CodecBuilder
 type Codec struct {

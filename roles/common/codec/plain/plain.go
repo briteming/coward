@@ -20,15 +20,23 @@
 
 package plain
 
-import "io"
+import (
+	"io"
 
-type plain struct {
-	io.ReadWriter
+	"github.com/reinit/coward/common/rw"
+)
+
+type plain struct{}
+
+func (p plain) Encode(i io.Writer) rw.WriteWriteAll {
+	return encoder{w: i}
+}
+
+func (p plain) Decode(i io.Reader) io.Reader {
+	return i
 }
 
 // New returns a new Plain codc
-func New(rw io.ReadWriter) (io.ReadWriter, error) {
-	return plain{
-		ReadWriter: rw,
-	}, nil
+func New() (rw.Codec, error) {
+	return plain{}, nil
 }

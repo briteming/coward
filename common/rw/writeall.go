@@ -22,6 +22,12 @@ package rw
 
 import "io"
 
+// WriteAll completely writes all given bytes, fail if write operation
+// had failed on any given bytes
+type WriteAll interface {
+	WriteAll(b ...[]byte) (int, error)
+}
+
 // WriteFull keep writing until all data is written
 func WriteFull(writer io.Writer, b []byte) (int, error) {
 	writtenLen := 0

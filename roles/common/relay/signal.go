@@ -18,60 +18,36 @@
 //  along with Crypto-Obscured Forwarder. If not, see
 //  <http://www.gnu.org/licenses/>.
 
-package aescfb
+package relay
 
-import (
-	"crypto/rand"
-	"io"
+import "strconv"
 
-	"github.com/reinit/coward/common/rw"
-	"github.com/reinit/coward/roles/common/transceiver"
-)
+// Signal represents a Relay Signal
+type Signal byte
 
-// Errors
-var (
-	ErrPaddingTooLong = transceiver.NewCodecError(
-		"Padding too long")
-)
-
+// Consts for Signal
 const (
-	maxPaddingLength = 32
+	SignalData      Signal = 0xFB
+	SignalError     Signal = 0xFC
+	SignalCompleted Signal = 0xFD
+	SignalClose     Signal = 0xFE
+	SignalClosed    Signal = 0xFF
 )
 
-type padding struct {
-	padBuf [maxPaddingLength]byte
-}
-
-func (p *padding) Passthrough(r io.Reader) error {
-	_, rErr := io.ReadFull(r, p.padBuf[:1])
-
-	if rErr != nil {
-		return rErr
+// String return name of a Signal value
+func (s Signal) String() string {
+	switch s {
+	case SignalData:
+		return "Data"
+	case SignalError:
+		return "Error"
+	case SignalCompleted:
+		return "Completed"
+	case SignalClose:
+		return "Close"
+	case SignalClosed:
+		return "Closed"
 	}
 
-	if p.padBuf[0] <= 0 {
-		return nil
-	}
-
-	if p.padBuf[0] > maxPaddingLength {
-		return ErrPaddingTooLong
-	}
-
-	_, rErr = io.ReadFull(r, p.padBuf[:p.padBuf[0]])
-
-	if rErr != nil {
-		return rErr
-	}
-
-	return nil
-}
-
-func (p *padding) Insert(w io.Writer) error {
-	rand.Read(p.padBuf[:])
-
-	p.padBuf[0] %= maxPaddingLength
-
-	_, wErr := rw.WriteFull(w, p.padBuf[:1+p.padBuf[0]])
-
-	return wErr
+	return strconv.FormatUint(uint64(s), 10)
 }

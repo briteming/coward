@@ -67,6 +67,9 @@ var (
 
 	ErrAlreadyClosed = errors.New(
 		"Client already closed")
+
+	ErrConnectionNotAvailable = errors.New(
+		"Connection not available")
 )
 
 // virtualChannelRequests
@@ -111,13 +114,14 @@ type connectRequest struct {
 
 // connectRequestResult is the result of connectRequest
 type connectRequestResult struct {
-	ID    transceiver.ConnectionID
-	Error error
+	ID       transceiver.ConnectionID
+	Error    error
+	FailWait chan struct{}
 }
 
 // virtualChannel is the data of a Virtual Channel
 type virtualChannel struct {
-	ID             transceiver.ConnectionID
+	ConnectionID   transceiver.ConnectionID
 	ChannelID      channel.ID
 	Channel        connection.Virtual
 	Connection     connCtl
@@ -241,7 +245,6 @@ func (c *client) connect(
 	closeNotify := make(chan struct{})
 	defer close(closeNotify)
 
-	log := l.Context(dial.String())
 	needClose := true
 
 	// Dial
@@ -249,12 +252,15 @@ func (c *client) connect(
 
 	if dialErr != nil {
 		result <- connectRequestResult{
-			ID:    connectionID,
-			Error: ErrConnectionConnectFailed,
+			ID:       connectionID,
+			Error:    ErrConnectionConnectFailed,
+			FailWait: closeNotify,
 		}
 
 		return dialErr
 	}
+
+	log := l.Context(conn.LocalAddr().String()).Context(dial.String())
 
 	tm.Stop()
 
@@ -268,8 +274,6 @@ func (c *client) connect(
 		conn.Close()
 	}()
 
-	log = log.Context(conn.LocalAddr().String())
-
 	// Publish connection
 	select {
 	case c.connectionConnected <- connectedConnection{
@@ -280,8 +284,9 @@ func (c *client) connect(
 
 	case <-c.connectionClosing:
 		result <- connectRequestResult{
-			ID:    connectionID,
-			Error: ErrConnectionShutdownClosing,
+			ID:       connectionID,
+			Error:    ErrConnectionShutdownClosing,
+			FailWait: closeNotify,
 		}
 
 		return ErrConnectionShutdownClosing
@@ -321,8 +326,9 @@ func (c *client) connect(
 	select {
 	case <-c.connectionClosing:
 		result <- connectRequestResult{
-			ID:    connectionID,
-			Error: ErrConnectionShutdownClosing,
+			ID:       connectionID,
+			Error:    ErrConnectionShutdownClosing,
+			FailWait: closeNotify,
 		}
 
 		return ErrConnectionShutdownClosing
@@ -334,12 +340,13 @@ func (c *client) connect(
 	// Init connection
 	channelCreated := 0
 
-	cc, ccErr := connection.Codec(conn, c.codec)
+	cc, ccErr := connection.Codec(c.codec)
 
 	if ccErr != nil {
 		result <- connectRequestResult{
-			ID:    connectionID,
-			Error: ccErr,
+			ID:       connectionID,
+			Error:    ccErr,
+			FailWait: closeNotify,
 		}
 
 		return ccErr
@@ -348,14 +355,14 @@ func (c *client) connect(
 	requestCounter := connectionRunningRequests{
 		requests: 0, lock: &c.connectionRunningReqLock}
 
-	channelized := connection.Channelize(cc, c.requestWaitTicker)
+	channelized := connection.Channelize(conn, cc, c.requestWaitTicker)
 	channelized.Timeout(d.InitialTimeout)
 
 	vChannels := channel.New(func(id channel.ID) fsm.Machine {
 		channelCreated++
 
 		vChannel := virtualChannel{
-			ID:             connectionID,
+			ConnectionID:   connectionID,
 			ChannelID:      id,
 			Channel:        channelized.For(id),
 			Connection:     connCtl{connection: conn},
@@ -381,7 +388,7 @@ func (c *client) connect(
 		channelCloseTryRemain := c.maxChannels
 
 		for ch := range c.channel {
-			if ch.ID == connectionID {
+			if ch.ConnectionID == connectionID {
 				channelCreated--
 
 				if channelCreated > 0 {
@@ -393,9 +400,9 @@ func (c *client) connect(
 
 			c.channel <- ch
 
-			c.connectionCloserLocks[ch.ID].L.Lock()
-			c.connectionCloserLocks[ch.ID].Broadcast()
-			c.connectionCloserLocks[ch.ID].L.Unlock()
+			c.connectionCloserLocks[ch.ConnectionID].L.Lock()
+			c.connectionCloserLocks[ch.ConnectionID].Broadcast()
+			c.connectionCloserLocks[ch.ConnectionID].L.Unlock()
 
 			channelCloseTryRemain--
 
@@ -417,16 +424,18 @@ func (c *client) connect(
 
 	if bootUpErr != nil {
 		result <- connectRequestResult{
-			ID:    connectionID,
-			Error: bootUpErr,
+			ID:       connectionID,
+			Error:    bootUpErr,
+			FailWait: closeNotify,
 		}
 
 		return bootUpErr
 	}
 
 	result <- connectRequestResult{
-		ID:    connectionID,
-		Error: nil,
+		ID:       connectionID,
+		Error:    nil,
+		FailWait: closeNotify,
 	}
 
 	// Serve
@@ -550,9 +559,10 @@ func (c *client) getConnection(
 		Result: make(chan connectRequestResult),
 	}
 	connectionConnect := c.connectionConnect
-	retryRemains := c.requestRetries
+	connectReactiveSignalChan := make(chan struct{})
+	lastErr := ErrConnectionNotAvailable
 
-	for {
+	for retryRemains := c.requestRetries; retryRemains > 0; retryRemains-- {
 		select {
 		case c.running <- struct{}{}:
 			<-c.running
@@ -562,21 +572,27 @@ func (c *client) getConnection(
 		case <-c.connectionClosing:
 			return virtualChannel{}, false, ErrConnectionShutdownClosing
 
+		case <-connectReactiveSignalChan:
+			connectReactiveSignalChan = nil
+			connectionConnect = c.connectionConnect
+
 		case connectionConnect <- connectReq:
+			connectReactiveSignalChan = nil
+
 			rr := <-connectReq.Result
 
 			if rr.Error != nil {
-				retryRemains--
-
-				if retryRemains > 0 {
-					continue
-				} else {
-					return virtualChannel{}, true, rr.Error
+				if rr.FailWait != nil {
+					<-rr.FailWait
 				}
-			}
 
-			// If one connection is established, don't connect another
-			connectionConnect = nil
+				lastErr = rr.Error
+			} else {
+				connectReactiveSignalChan = rr.FailWait
+
+				// If one connection is established, don't connect another
+				connectionConnect = nil
+			}
 
 		case cc := <-c.channel:
 			return cc, true, nil
@@ -585,6 +601,8 @@ func (c *client) getConnection(
 			return virtualChannel{}, false, ErrConnectionConnectCanceled
 		}
 	}
+
+	return virtualChannel{}, true, lastErr
 }
 
 // Serve start serving
@@ -745,9 +763,9 @@ func (c *client) Available() bool {
 	case cc := <-c.channel:
 		c.channel <- cc
 
-		c.connectionCloserLocks[cc.ID].L.Lock()
-		c.connectionCloserLocks[cc.ID].Broadcast()
-		c.connectionCloserLocks[cc.ID].L.Unlock()
+		c.connectionCloserLocks[cc.ConnectionID].L.Lock()
+		c.connectionCloserLocks[cc.ConnectionID].Broadcast()
+		c.connectionCloserLocks[cc.ConnectionID].L.Unlock()
 
 		return true
 
@@ -773,31 +791,28 @@ func (c *client) request(
 	defer func() {
 		c.channel <- ch
 
-		c.connectionCloserLocks[ch.ID].L.Lock()
-		c.connectionCloserLocks[ch.ID].Broadcast()
-		c.connectionCloserLocks[ch.ID].L.Unlock()
+		c.connectionCloserLocks[ch.ConnectionID].L.Lock()
+		c.connectionCloserLocks[ch.ConnectionID].Broadcast()
+		c.connectionCloserLocks[ch.ConnectionID].L.Unlock()
 	}()
 
 	connLogger := log.Context("Connection (" +
-		strconv.FormatUint(uint64(ch.ID), 10) + ")",
-	).Context("Channel (" +
-		strconv.FormatUint(uint64(ch.ChannelID), 10) + ")")
+		strconv.FormatUint(uint64(ch.ConnectionID), 10) + ")",
+	).Context("Channel (" + strconv.FormatUint(uint64(ch.ChannelID), 10) + ")")
 
 	ch.Running.Increase()
 
-	defer func() {
-		ch.Running.Decrease(func(count uint32) {
-			if c.cfg.ConnectionPersistent {
-				return
-			}
+	defer ch.Running.Decrease(func(count uint32) {
+		if c.cfg.ConnectionPersistent {
+			return
+		}
 
-			if count > 0 {
-				return
-			}
+		if count > 0 {
+			return
+		}
 
-			ch.Channel.CloseAll()
-		})
-	}()
+		ch.Connection.Demolish()
+	})
 
 	select {
 	case <-ch.Closed:
@@ -818,7 +833,7 @@ func (c *client) request(
 	reqTimer := meter.Request()
 
 	reqFSM := fsm.New(requestBuilder(
-		ch.ID, ch.Channel, ch.Connection, connLogger))
+		ch.ConnectionID, ch.Channel, ch.Connection, connLogger))
 
 	ch.Channel.Timeout(ch.InitialTimeout)
 
@@ -830,7 +845,7 @@ func (c *client) request(
 		_, connErr := initErr.(connection.Error)
 
 		if connErr {
-			ch.Channel.CloseAll()
+			ch.Connection.Demolish()
 
 			return ch.CloseWait, true, false, connLogger, initErr
 		}
@@ -854,7 +869,7 @@ func (c *client) request(
 		_, connErr := handleErr.(connection.Error)
 
 		if connErr {
-			ch.Channel.CloseAll()
+			ch.Connection.Demolish()
 
 			return ch.CloseWait, false, false, connLogger, handleErr
 		}
@@ -885,6 +900,10 @@ func (c *client) Request(
 		retryWait, retriable, wontCount, connLog, err = c.request(
 			requestBuilder, cancel, meter, log)
 
+		if retryWait != nil {
+			<-retryWait
+		}
+
 		if err == nil {
 			break
 		}
@@ -904,12 +923,6 @@ func (c *client) Request(
 
 		connLog.Debugf("Request has failed due to error: %s. Retrying (%d/%d)",
 			err, retried+1, c.requestRetries)
-
-		if retryWait == nil {
-			continue
-		}
-
-		<-retryWait
 	}
 
 	return retriable, err

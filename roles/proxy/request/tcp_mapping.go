@@ -25,6 +25,7 @@ import (
 	"io"
 
 	"github.com/reinit/coward/common/fsm"
+	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/command"
 	"github.com/reinit/coward/roles/common/network"
@@ -59,10 +60,11 @@ func (c TCPMapping) ID() command.ID {
 }
 
 // New creates a new request context
-func (c TCPMapping) New(rw rw.ReadWriteDepleteDoner) fsm.Machine {
+func (c TCPMapping) New(
+	rw rw.ReadWriteDepleteDoner, l logger.Logger) fsm.Machine {
 	return &tcpMapping{
 		tcp: tcp{
-			logger:            c.Logger,
+			logger:            l,
 			buf:               c.Buffer,
 			dialTimeout:       c.DialTimeout,
 			connectionTimeout: c.ConnectionTimeout,
@@ -90,13 +92,13 @@ func (c *tcpMapping) Bootup() (fsm.State, error) {
 	mapped, mappedErr := c.mapping.Get(common.MapID(c.buf[0]))
 
 	if mappedErr != nil {
-		c.rw.Write([]byte{TCPRespondMappingNotFound})
+		rw.WriteFull(c.rw, []byte{TCPRespondMappingNotFound})
 
 		return nil, mappedErr
 	}
 
 	if mapped.Protocol != network.TCP {
-		c.rw.Write([]byte{TCPRespondMappingNotFound})
+		rw.WriteFull(c.rw, []byte{TCPRespondMappingNotFound})
 
 		return nil, ErrTCPMappingNotFound
 	}

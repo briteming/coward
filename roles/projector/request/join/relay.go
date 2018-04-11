@@ -65,6 +65,10 @@ func (r requestRelay) Initialize(l logger.Logger, server relay.Server) error {
 	return nil
 }
 
+func (r requestRelay) Abort(l logger.Logger, aborter relay.Aborter) error {
+	return aborter.Goodbye()
+}
+
 // Client returns the client
 func (r requestRelay) Client(
 	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {

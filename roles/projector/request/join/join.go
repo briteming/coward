@@ -33,7 +33,6 @@ import (
 
 // join Join request handler
 type join struct {
-	logger                logger.Logger
 	cfg                   Config
 	runner                worker.Runner
 	parentConn            network.Connection
@@ -51,7 +50,6 @@ func New(
 	cfg Config,
 ) command.Command {
 	return join{
-		logger:                logger,
 		cfg:                   cfg,
 		runner:                runner,
 		parentConn:            parentConn,
@@ -70,9 +68,9 @@ func (j join) ID() command.ID {
 }
 
 // New creates a new request processor
-func (j join) New(rw rw.ReadWriteDepleteDoner) fsm.Machine {
+func (j join) New(rw rw.ReadWriteDepleteDoner, log logger.Logger) fsm.Machine {
 	return &processor{
-		logger:                      j.logger,
+		logger:                      log,
 		cfg:                         j.cfg,
 		runner:                      j.runner,
 		parentConn:                  j.parentConn,

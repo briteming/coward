@@ -107,13 +107,20 @@ func (c udpRelay) Initialize(l logger.Logger, server relay.Server) error {
 		return ErrUDPServerRelayFailed
 
 	default:
+		l.Debugf("Server responded with an unknown UDP initial result: %d",
+			command[0])
+
 		return ErrUDPServerInitialUnknownError
 	}
 
 	// Send close, let the server knows that we'll go away
-	server.SendSignal(relay.SignalCompleted, relay.SignalClose)
+	server.Goodbye()
 
 	return initError
+}
+
+func (c udpRelay) Abort(l logger.Logger, aborter relay.Aborter) error {
+	return aborter.Goodbye()
 }
 
 func (c udpRelay) Client(

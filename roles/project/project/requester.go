@@ -150,6 +150,9 @@ func (h *requester) Bootup() (fsm.State, error) {
 		return nil, ErrHandlerJoinRespondInternalFailure
 
 	default:
+		h.log.Debugf("Server responded with an unknown Join result: %d",
+			h.buf[0])
+
 		return nil, ErrHandlerJoinUnknownRespond
 	}
 
@@ -561,6 +564,8 @@ func (h *requester) wait(f fsm.FSM) error {
 		}
 
 	default:
+		h.log.Debugf("Received an unknown request: %d", h.buf[0])
+
 		return ErrHandlerWaitUnknownSignal
 	}
 }

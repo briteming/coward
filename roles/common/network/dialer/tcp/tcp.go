@@ -96,6 +96,8 @@ func (d *dial) Dial() (network.Connection, error) {
 	d.useResolved = true
 	d.resolved = dialed.RemoteAddr().(*net.TCPAddr).IP
 
+	dialed.(*net.TCPConn).SetNoDelay(false)
+
 	return d.connWrapper(dialed), nil
 }
 

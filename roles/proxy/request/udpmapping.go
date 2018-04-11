@@ -27,9 +27,9 @@ import (
 	"time"
 
 	"github.com/reinit/coward/common/fsm"
-	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
+	"github.com/reinit/coward/common/worker"
 	"github.com/reinit/coward/roles/common/command"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/relay"
@@ -44,7 +44,6 @@ var (
 
 // UDPMapping UDP Mapping request
 type UDPMapping struct {
-	Logger      logger.Logger
 	Runner      worker.Runner
 	Buffer      []byte
 	Cancel      <-chan struct{}
@@ -71,9 +70,10 @@ func (c UDPMapping) ID() command.ID {
 }
 
 // New creates a new request context
-func (c UDPMapping) New(rw rw.ReadWriteDepleteDoner) fsm.Machine {
+func (c UDPMapping) New(
+	rw rw.ReadWriteDepleteDoner, log logger.Logger) fsm.Machine {
 	return &udpMapping{
-		logger:      c.Logger,
+		logger:      log,
 		mapping:     c.Mapping,
 		buf:         c.Buffer,
 		localAddr:   c.LocalAddr,
@@ -99,13 +99,13 @@ func (u *udpMapping) Bootup() (fsm.State, error) {
 	mapped, mappedErr := u.mapping.Get(common.MapID(u.buf[0]))
 
 	if mappedErr != nil {
-		u.rw.Write([]byte{UDPRespondMappingNotFound})
+		rw.WriteFull(u.rw, []byte{UDPRespondMappingNotFound})
 
 		return nil, mappedErr
 	}
 
 	if mapped.Protocol != network.UDP {
-		u.rw.Write([]byte{UDPRespondMappingNotFound})
+		rw.WriteFull(u.rw, []byte{UDPRespondMappingNotFound})
 
 		return nil, ErrUDPMappingNotFound
 	}

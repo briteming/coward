@@ -69,6 +69,10 @@ func (h *relaying) Initialize(l logger.Logger, server relay.Server) error {
 	return nil
 }
 
+func (h *relaying) Abort(l logger.Logger, aborter relay.Aborter) error {
+	return aborter.Goodbye()
+}
+
 func (h *relaying) Client(
 	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
 	// This is "Server" (endpoint) -side of relay, no need to set

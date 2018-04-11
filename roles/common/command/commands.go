@@ -25,6 +25,7 @@ import (
 	"fmt"
 
 	"github.com/reinit/coward/common/fsm"
+	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
 )
 
@@ -48,7 +49,7 @@ type Commands interface {
 // Command is a command
 type Command interface {
 	ID() ID
-	New(rw.ReadWriteDepleteDoner) fsm.Machine
+	New(rw.ReadWriteDepleteDoner, logger.Logger) fsm.Machine
 }
 
 // Consts

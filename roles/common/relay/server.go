@@ -21,25 +21,35 @@
 package relay
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
+	"github.com/reinit/coward/common/logger"
 	"github.com/reinit/coward/common/rw"
+)
+
+// Errors
+var (
+	ErrUnexpectedCloseSignal = errors.New(
+		"Unexpected Relay close signal")
 )
 
 // Server is server-side conn wrapper for Relay Client initialization
 type Server interface {
 	rw.ReadWriteDepleteDoner
 
-	SendSignal(s Signal, expectingRespond Signal) error
+	Goodbye() error
 }
 
 // server implements Server
 type server struct {
 	rw.ReadWriteDepleteDoner
+
+	log logger.Logger
 }
 
-func (c server) waitForRespond(expecting Signal) error {
+func (c server) waitForRespond(checker func(s Signal) bool) (Signal, error) {
 	defer c.ReadWriteDepleteDoner.Done()
 
 	command := [1]byte{}
@@ -48,30 +58,63 @@ func (c server) waitForRespond(expecting Signal) error {
 		_, crErr := io.ReadFull(c.ReadWriteDepleteDoner, command[:])
 
 		if crErr != nil {
-			return crErr
+			return 0, crErr
 		}
 
-		if Signal(command[0]) != expecting {
-			c.ReadWriteDepleteDoner.Done()
+		signalRead := Signal(command[0])
 
-			continue
+		if checker(signalRead) {
+			return signalRead, nil
 		}
 
-		return nil
+		c.ReadWriteDepleteDoner.Done()
 	}
 }
 
-// SendSignalWaitRespond sends a Relay Signal, and wait until expected respond
-// are received
-func (c server) SendSignal(s Signal, expectingRespond Signal) error {
+// Goodbye properly asks remote relay to shutdown
+func (c server) Goodbye() error {
+	c.log.Debugf("Sending Goodbye")
+
 	_, wErr := rw.WriteFull(c.ReadWriteDepleteDoner, []byte{
-		byte(s), byte(expectingRespond)})
+		byte(SignalCompleted)})
 
 	if wErr != nil {
 		return wErr
 	}
 
-	return c.waitForRespond(expectingRespond)
+	signalPassed := 0
+
+	respondedSignal, respErr := c.waitForRespond(func(s Signal) bool {
+		signalPassed++
+
+		if s != SignalClose && s != SignalClosed {
+			c.log.Debugf("Ignoring remote signal \"%s\"", s)
+
+			return false
+		}
+
+		return true
+	})
+
+	if respErr != nil {
+		return respErr
+	}
+
+	c.log.Debugf("Reached expected remote confirm signal \"%s\" after reading "+
+		"%d segments", respondedSignal, signalPassed)
+
+	switch respondedSignal {
+	case SignalClosed:
+		return nil
+
+	case SignalClose:
+		_, wErr = rw.WriteFull(c.ReadWriteDepleteDoner, []byte{
+			byte(SignalClosed)})
+
+		return wErr
+	}
+
+	return ErrUnexpectedCloseSignal
 }
 
 // Write perform some operations to prepare the Relay data, and then, send

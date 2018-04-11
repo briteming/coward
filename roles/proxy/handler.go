@@ -69,7 +69,6 @@ func (d client) Serve() error {
 		command.New(
 			request.TCPIPv4{
 				TCP: request.TCP{
-					Logger:            d.logger,
 					Runner:            d.runner,
 					Buffer:            buf[:],
 					DialTimeout:       d.cfg.InitialTimeout,
@@ -80,7 +79,6 @@ func (d client) Serve() error {
 			},
 			request.TCPIPv6{
 				TCP: request.TCP{
-					Logger:            d.logger,
 					Runner:            d.runner,
 					Buffer:            buf[:],
 					DialTimeout:       d.cfg.InitialTimeout,
@@ -91,7 +89,6 @@ func (d client) Serve() error {
 			},
 			request.TCPHost{
 				TCP: request.TCP{
-					Logger:            d.logger,
 					Runner:            d.runner,
 					Buffer:            buf[:],
 					DialTimeout:       d.cfg.InitialTimeout,
@@ -102,7 +99,6 @@ func (d client) Serve() error {
 			},
 			request.TCPMapping{
 				TCP: request.TCP{
-					Logger:            d.logger,
 					Runner:            d.runner,
 					Buffer:            buf[:],
 					DialTimeout:       d.cfg.InitialTimeout,
@@ -113,14 +109,12 @@ func (d client) Serve() error {
 				Mapping: d.mapping,
 			},
 			request.UDP{
-				Logger:    d.logger,
 				Runner:    d.runner,
 				Buffer:    buf[:],
 				Cancel:    d.conn.Closed(),
 				LocalAddr: d.conn.LocalAddr(),
 			},
 			request.UDPMapping{
-				Logger:      d.logger,
 				Runner:      d.runner,
 				Buffer:      buf[:],
 				Cancel:      d.conn.Closed(),

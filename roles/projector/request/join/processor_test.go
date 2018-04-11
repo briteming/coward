@@ -176,7 +176,6 @@ func testGetJoin() (*join, *dummyProjection, *dummyProjection, worker.Runner) {
 	}
 
 	return &join{
-		logger: logger.NewDitch(),
 		cfg:    cfg,
 		runner: rr,
 		registered: registerations{
@@ -407,7 +406,7 @@ func TestProccessor(t *testing.T) {
 
 				// Client: OK, I have closed my side of relay
 				clientConn.readChan <- bytes.NewBuffer([]byte{
-					byte(relay.SignalClose)})
+					byte(relay.SignalClosed)})
 
 				accResult := <-acc.result
 
@@ -456,7 +455,7 @@ func TestProccessor(t *testing.T) {
 		}
 	}()
 
-	machine := fsm.New(j.New(clientConn))
+	machine := fsm.New(j.New(clientConn, logger.NewDitch()))
 	bootErr := machine.Bootup()
 
 	if bootErr != nil {

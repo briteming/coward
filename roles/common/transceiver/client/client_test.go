@@ -115,8 +115,56 @@ func (d *dummyConnection) Close() error {
 	return nil
 }
 
-func testDummyEncodec(rw io.ReadWriter) (io.ReadWriter, error) {
-	return rw, nil
+type dummyCoder struct{}
+
+type dummyCodecEncoder struct {
+	w io.Writer
+}
+
+type dummyCodecDecoder struct {
+	r io.Reader
+}
+
+func (d dummyCoder) Encode(w io.Writer) rw.WriteWriteAll {
+	return dummyCodecEncoder{w: w}
+}
+
+func (d dummyCoder) Decode(r io.Reader) io.Reader {
+	return dummyCodecDecoder{r: r}
+}
+
+func (d dummyCodecDecoder) Read(b []byte) (int, error) {
+	rLen, rErr := d.r.Read(b)
+
+	if rErr != nil {
+		return rLen, rErr
+	}
+
+	return rLen, nil
+}
+
+func (d dummyCodecEncoder) Write(b []byte) (int, error) {
+	return d.Write(b)
+}
+
+func (d dummyCodecEncoder) WriteAll(b ...[]byte) (int, error) {
+	totalWrite := 0
+
+	for bb := range b {
+		wLen, wErr := d.w.Write(b[bb])
+
+		totalWrite += wLen
+
+		if wErr != nil {
+			return totalWrite, wErr
+		}
+	}
+
+	return totalWrite, nil
+}
+
+func testDummyEncodec() (rw.Codec, error) {
+	return dummyCoder{}, nil
 }
 
 func TestClientUpDown(t *testing.T) {

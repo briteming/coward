@@ -39,3 +39,31 @@ type ReadWriteDepleteDoner interface {
 	Depleter
 	Doner
 }
+
+// Codec encodes and decodes data
+type Codec interface {
+	Decode(io.Reader) io.Reader
+	Encode(io.Writer) WriteWriteAll
+}
+
+// WriteMax only write maxmius max bytes data to the writer
+type WriteMax interface {
+	WriteMax(w io.Writer, max int) (int, error)
+}
+
+// Remainer returns the remaining length
+type Remainer interface {
+	Remain() int
+}
+
+// WriteMaxRemainer WriteMax + Remainer
+type WriteMaxRemainer interface {
+	WriteMax
+	Remainer
+}
+
+// WriteWriteAll io.Writer + WriteAll
+type WriteWriteAll interface {
+	io.Writer
+	WriteAll
+}

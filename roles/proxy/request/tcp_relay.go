@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/network"
 	"github.com/reinit/coward/roles/common/relay"
 )
@@ -41,12 +42,16 @@ func (c tcpRelay) Initialize(l logger.Logger, server relay.Server) error {
 	return nil
 }
 
+func (c tcpRelay) Abort(l logger.Logger, aborter relay.Aborter) error {
+	return aborter.SendError()
+}
+
 func (c tcpRelay) Client(
 	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
 	remoteConn, remoteDialErr := c.dial.Dial()
 
 	if remoteDialErr != nil {
-		_, wErr := server.Write([]byte{TCPRespondUnreachable})
+		_, wErr := rw.WriteFull(server, []byte{TCPRespondUnreachable})
 
 		if wErr != nil {
 			return nil, wErr
@@ -63,7 +68,7 @@ func (c tcpRelay) Client(
 			remoteAddr.IP.IsMulticast()) {
 		remoteConn.Close()
 
-		_, wErr := server.Write([]byte{TCPRespondAccessDeined})
+		_, wErr := rw.WriteFull(server, []byte{TCPRespondAccessDeined})
 
 		if wErr != nil {
 			return nil, wErr
@@ -72,7 +77,7 @@ func (c tcpRelay) Client(
 		return nil, ErrTCPLocalAccessDeined
 	}
 
-	_, wErr := server.Write([]byte{TCPRespondOK})
+	_, wErr := rw.WriteFull(server, []byte{TCPRespondOK})
 
 	if wErr != nil {
 		remoteConn.Close()

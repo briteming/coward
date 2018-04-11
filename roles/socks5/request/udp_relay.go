@@ -214,14 +214,21 @@ func (u *udpRelay) Initialize(l logger.Logger, server relay.Server) error {
 	default:
 		u.udpConn.Close()
 
+		l.Debugf("Server responded with an unknown UDP initial result: %d",
+			serverResp[0])
+
 		return ErrUDPUnknownError
 	}
 
 	u.udpConn.Close()
 
-	server.SendSignal(relay.SignalCompleted, relay.SignalClose)
+	server.Goodbye()
 
 	return serverRespErr
+}
+
+func (u *udpRelay) Abort(l logger.Logger, aborter relay.Aborter) error {
+	return aborter.Goodbye()
 }
 
 func (u *udpRelay) Client(

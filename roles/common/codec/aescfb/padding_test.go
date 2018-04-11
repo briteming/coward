@@ -28,14 +28,10 @@ import (
 
 func TestPadding(t *testing.T) {
 	data := bytes.NewBuffer(make([]byte, 0, 1024))
-	rPad := padding{
-		nextPaddingLength: 0,
-	}
-	wPad := padding{
-		nextPaddingLength: 0,
-	}
+	rPad := padding{padBuf: [maxPaddingLength]byte{}}
+	wPad := padding{padBuf: [maxPaddingLength]byte{}}
 
-	insertErr := wPad.Insert(data, 128)
+	insertErr := wPad.Insert(data)
 
 	if insertErr != nil {
 		t.Error("Padding insert failed:", insertErr)
@@ -45,7 +41,7 @@ func TestPadding(t *testing.T) {
 
 	data.Write([]byte("Test data segment 1"))
 
-	insertErr = wPad.Insert(data, 128)
+	insertErr = wPad.Insert(data)
 
 	if insertErr != nil {
 		t.Error("Padding insert failed:", insertErr)
@@ -55,7 +51,7 @@ func TestPadding(t *testing.T) {
 
 	data.Write([]byte("Test data segment 2"))
 
-	insertErr = wPad.Insert(data, 128)
+	insertErr = wPad.Insert(data)
 
 	if insertErr != nil {
 		t.Error("Padding insert failed:", insertErr)

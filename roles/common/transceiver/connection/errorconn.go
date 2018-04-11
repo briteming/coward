@@ -32,11 +32,21 @@ type errorconn struct {
 	network.Connection
 }
 
+func (e errorconn) wrapError(ee error) error {
+	// Connection management need to be more aggressive to
+	// ensure the data completeness on the Transceiver connection
+	// Because of that, we will treat all errors emitted by the connection
+	// as terminal errors
+	e.Connection.Close()
+
+	return WrapError(ee)
+}
+
 func (e errorconn) Read(b []byte) (int, error) {
 	l, err := e.Connection.Read(b)
 
 	if err != nil {
-		return l, WrapError(err)
+		return l, e.wrapError(err)
 	}
 
 	return l, nil
@@ -46,7 +56,7 @@ func (e errorconn) Write(b []byte) (int, error) {
 	l, err := e.Connection.Write(b)
 
 	if err != nil {
-		return l, WrapError(err)
+		return l, e.wrapError(err)
 	}
 
 	return l, nil
@@ -56,7 +66,7 @@ func (e errorconn) Close() error {
 	err := e.Connection.Close()
 
 	if err != nil {
-		return WrapError(err)
+		return e.wrapError(err)
 	}
 
 	return nil
@@ -66,7 +76,7 @@ func (e errorconn) SetDeadline(t time.Time) error {
 	err := e.Connection.SetDeadline(t)
 
 	if err != nil {
-		return WrapError(err)
+		return e.wrapError(err)
 	}
 
 	return nil
@@ -76,7 +86,7 @@ func (e errorconn) SetReadDeadline(t time.Time) error {
 	err := e.Connection.SetReadDeadline(t)
 
 	if err != nil {
-		return WrapError(err)
+		return e.wrapError(err)
 	}
 
 	return nil
@@ -86,7 +96,7 @@ func (e errorconn) SetWriteDeadline(t time.Time) error {
 	err := e.Connection.SetWriteDeadline(t)
 
 	if err != nil {
-		return WrapError(err)
+		return e.wrapError(err)
 	}
 
 	return nil

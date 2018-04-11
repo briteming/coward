@@ -91,7 +91,7 @@ func (s *socks5) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		MaxWorkers: s.cfg.Capacity * 2,
 		MinWorkers: pcommon.AutomaticalMinWorkerCount(
 			s.cfg.Capacity*2, 128),
-		MaxWorkerIdle:     s.cfg.ConnectionTimeout * 10,
+		MaxWorkerIdle:     s.cfg.ConnectionTimeout * 2,
 		JobReceiveTimeout: s.cfg.NegotiationTimeout,
 	}).Serve()
 

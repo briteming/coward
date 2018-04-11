@@ -70,13 +70,13 @@ func (s *server) Handle(
 ) error {
 	log := l.Context("Transceiver")
 
-	cc, ccErr := connection.Codec(conn, s.codec)
+	cc, ccErr := connection.Codec(s.codec)
 
 	if ccErr != nil {
 		return ccErr
 	}
 
-	channelized := connection.Channelize(cc, s.timeTicker)
+	channelized := connection.Channelize(conn, cc, s.timeTicker)
 	channelized.Timeout(s.cfg.InitialTimeout)
 
 	defer channelized.Shutdown()
@@ -143,38 +143,44 @@ func (s *server) Handle(
 
 		if !machine.Running() {
 			tickErr = machine.Bootup()
-
-			if tickErr == nil {
-				continue
-			}
-
-			log.Warningf("An error occurred when initializing request for "+
-				"Channel %d: %s", channelID, tickErr)
 		} else {
 			tickErr = machine.Tick()
-
-			if tickErr == nil {
-				continue
-			}
-
-			sdErr := machine.Shutdown()
-
-			if sdErr != nil {
-				log.Warningf("An error occurred when handling request for "+
-					"Channel %d: %s. And another error also occurred "+
-					"during request shutdown: %s", channelID, tickErr, sdErr)
-			} else {
-				log.Warningf("An error occurred when handling request for "+
-					"Channel %d: %s", channelID, tickErr)
-			}
 		}
 
-		switch tErr := tickErr.(type) {
+		if tickErr == nil {
+			continue
+		}
+
+		continueHandling := true
+
+		switch tickErr.(type) {
 		case transceiver.CodecError:
-			return tErr
+			continueHandling = false
 
 		case connection.Error:
-			return tErr
+			continueHandling = false
 		}
+
+		var sdErr error
+
+		if machine.Running() {
+			sdErr = machine.Shutdown()
+		}
+
+		if sdErr != nil {
+			log.Warningf("An error occurred when handling request "+
+				"for Channel %d: %s. And another error also "+
+				"occurred during request shutdown: %s",
+				channelID, tickErr, sdErr)
+		} else {
+			log.Warningf("An error occurred when handling request for "+
+				"Channel %d: %s", channelID, tickErr)
+		}
+
+		if continueHandling {
+			continue
+		}
+
+		return tickErr
 	}
 }

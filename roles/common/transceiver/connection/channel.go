@@ -41,9 +41,6 @@ var (
 	ErrChannelInitializationFailed = NewError(
 		"Failed to read initial information of Connection Channel")
 
-	ErrChannelWriteFailedToCopyData = NewError(
-		"Failed to copy data for writing")
-
 	ErrChannelWriteIncomplete = NewError(
 		"Incomplete write")
 
@@ -88,56 +85,34 @@ type Virtual interface {
 	rw.ReadWriteDepleteDoner
 
 	Timeout(time.Duration)
-	CloseAll() error
-}
-
-// channelWriteBuf creates and manages Channel Write Buffer
-type channelWriteBuf struct {
-	buf []byte
-}
-
-// Fetch returns a buf for Channel to write, create one if
-// needed.
-func (c *channelWriteBuf) Fetch(size int) []byte {
-	if len(c.buf) >= size {
-		return c.buf[:size]
-	}
-
-	if size%2 != 0 {
-		c.buf = make([]byte, size+1)
-	} else {
-		c.buf = make([]byte, size)
-	}
-
-	return c.buf
 }
 
 // channelize implements Channelizer
 type channelize struct {
 	conn              network.Connection
+	codec             rw.Codec
 	timeout           time.Duration
 	timeoutTicker     ticker.Requester
 	buf               [3]byte
 	channels          [ch.MaxChannels]*channel
-	channelsLock      sync.Mutex
 	dispatchCompleted chan struct{}
 	downSignal        chan struct{}
 	downed            bool
-	writeBuffer       channelWriteBuf
 	writeLock         sync.Mutex
 }
 
 // channelReader is the dispatched channel reader data
 type channelReader struct {
-	Connection network.Connection
-	Length     uint16
-	Complete   chan struct{}
+	Reader   network.Connection
+	Length   uint16
+	Complete chan struct{}
 }
 
 // channel implements Channel
 type channel struct {
 	network.Connection
 
+	codec         rw.Codec
 	id            ch.ID
 	parent        Channelizer
 	timeout       time.Duration
@@ -146,26 +121,25 @@ type channel struct {
 	connReader    chan channelReader
 	currentReader channelReader
 	downSignal    chan struct{}
-	writeBuffer   *channelWriteBuf
 	writeLock     *sync.Mutex
 }
 
 // Channelize creates a Connection Channel for mulit-channel dispatch
 func Channelize(
 	c network.Connection,
+	codec rw.Codec,
 	timeoutTicker ticker.Requester,
 ) Channelizer {
 	return &channelize{
-		conn:              errorconn{Connection: c},
+		conn:              newBuffered(errorconn{Connection: c}, 4096),
+		codec:             codec,
 		timeout:           0,
 		timeoutTicker:     timeoutTicker,
 		buf:               [3]byte{},
 		channels:          [ch.MaxChannels]*channel{},
-		channelsLock:      sync.Mutex{},
 		dispatchCompleted: make(chan struct{}, 1),
 		downSignal:        make(chan struct{}),
 		downed:            false,
-		writeBuffer:       channelWriteBuf{},
 		writeLock:         sync.Mutex{},
 	}
 }
@@ -209,7 +183,7 @@ func (c *channelize) Dispatch(channels ch.Channels) (ch.ID, fsm.FSM, error) {
 		return 0, nil, ErrChannelShuttedDown
 	}
 
-	_, rErr := io.ReadFull(c.conn, c.buf[:3])
+	_, rErr := io.ReadFull(c.codec.Decode(c.conn), c.buf[:3])
 
 	if rErr != nil {
 		<-c.dispatchCompleted
@@ -239,9 +213,9 @@ func (c *channelize) Dispatch(channels ch.Channels) (ch.ID, fsm.FSM, error) {
 
 	select {
 	case c.channels[c.buf[0]].connReader <- channelReader{
-		Connection: c.conn,
-		Length:     segDataLen,
-		Complete:   c.dispatchCompleted}:
+		Reader:   c.conn,
+		Length:   segDataLen,
+		Complete: c.dispatchCompleted}:
 		return ch.ID(c.buf[0]), machine, nil
 
 	case <-c.conn.Closed():
@@ -268,15 +242,13 @@ func (c *channelize) Dispatch(channels ch.Channels) (ch.ID, fsm.FSM, error) {
 
 // For creates a Virtual Channel Connection reader for specified Channel
 func (c *channelize) For(id ch.ID) Virtual {
-	c.channelsLock.Lock()
-	defer c.channelsLock.Unlock()
-
 	if c.channels[id] != nil {
 		return c.channels[id]
 	}
 
 	c.channels[id] = &channel{
 		Connection:    c.conn,
+		codec:         c.codec,
 		id:            id,
 		parent:        c,
 		timeout:       c.timeout,
@@ -284,13 +256,12 @@ func (c *channelize) For(id ch.ID) Virtual {
 		connClosed:    c.conn.Closed(),
 		connReader:    make(chan channelReader, 1),
 		currentReader: channelReader{
-			Connection: nil,
-			Complete:   nil,
-			Length:     0,
+			Reader:   nil,
+			Complete: nil,
+			Length:   0,
 		},
-		downSignal:  c.downSignal,
-		writeBuffer: &c.writeBuffer,
-		writeLock:   &c.writeLock,
+		downSignal: c.downSignal,
+		writeLock:  &c.writeLock,
 	}
 
 	return c.channels[id]
@@ -298,9 +269,6 @@ func (c *channelize) For(id ch.ID) Virtual {
 
 // Shutdown closes all underlaying Virtual Channels
 func (c *channelize) Shutdown() error {
-	c.channelsLock.Lock()
-	defer c.channelsLock.Unlock()
-
 	if c.downed {
 		return ErrChannelShuttedDown
 	}
@@ -360,8 +328,8 @@ func (c *channel) Deplete() error {
 func (c *channel) Done() error {
 	err := c.Deplete()
 
-	if c.currentReader.Connection != nil {
-		c.currentReader.Connection = nil
+	if c.currentReader.Reader != nil {
+		c.currentReader.Reader = nil
 		<-c.currentReader.Complete
 	}
 
@@ -370,7 +338,7 @@ func (c *channel) Done() error {
 
 // Read reads data from Virtual Channel
 func (c *channel) Read(b []byte) (int, error) {
-	if c.currentReader.Connection == nil {
+	if c.currentReader.Reader == nil {
 		var timeoutTicker ticker.Wait
 
 		if c.timeout > 0 && c.timeoutTicker != nil {
@@ -388,7 +356,7 @@ func (c *channel) Read(b []byte) (int, error) {
 
 		select {
 		case reader := <-c.connReader:
-			c.currentReader.Connection = reader.Connection
+			c.currentReader.Reader = reader.Reader
 			c.currentReader.Length = reader.Length
 			c.currentReader.Complete = reader.Complete
 
@@ -418,7 +386,7 @@ func (c *channel) Read(b []byte) (int, error) {
 		maxReadLen = maxBufLen
 	}
 
-	rLen, rErr := c.currentReader.Connection.Read(b[:maxReadLen])
+	rLen, rErr := c.codec.Decode(c.currentReader.Reader).Read(b[:maxReadLen])
 
 	c.currentReader.Length -= uint16(rLen)
 
@@ -432,25 +400,21 @@ func (c *channel) Write(b []byte) (int, error) {
 
 	startPos := 0
 	bLen := len(b)
-
 	segLen := bLen
 
 	if segLen > math.MaxUint16 {
 		segLen = math.MaxUint16
 	}
 
-	writeBuf := c.writeBuffer.Fetch(segLen + 3)
+	headBuf := [3]byte{}
 
 	for bLen > startPos {
-		writeBuf[0] = c.id.Byte()
-		writeBuf[1] = 0 | byte(segLen>>8)
-		writeBuf[2] = 0 | byte(segLen<<8>>8)
+		headBuf[0] = c.id.Byte()
+		headBuf[1] = 0 | byte(segLen>>8)
+		headBuf[2] = 0 | byte(segLen<<8>>8)
 
-		if copy(writeBuf[3:segLen+3], b[startPos:startPos+segLen]) != segLen {
-			return startPos, ErrChannelWriteFailedToCopyData
-		}
-
-		_, wErr := rw.WriteFull(c.Connection, writeBuf[:segLen+3])
+		_, wErr := c.codec.Encode(c.Connection).
+			WriteAll(headBuf[:], b[startPos:startPos+segLen])
 
 		if wErr != nil {
 			return startPos, wErr
@@ -465,15 +429,4 @@ func (c *channel) Write(b []byte) (int, error) {
 	}
 
 	return startPos, nil
-}
-
-// Close closes the base connection that all virtual channels binded on
-func (c *channel) CloseAll() error {
-	sErr := c.parent.Shutdown()
-
-	if sErr != nil {
-		return sErr
-	}
-
-	return c.Connection.Close()
 }

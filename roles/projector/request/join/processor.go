@@ -340,9 +340,9 @@ func (p *processor) wait(f fsm.FSM) error {
 			return ErrProcessorWaitUnexpectedClientRelayInitedSignal
 		}
 
-	case RespondClientRelayInitializationFailed:
-		fallthrough
 	case byte(relay.SignalError):
+		fallthrough
+	case RespondClientRelayInitializationFailed:
 		select {
 		case p.currentReceivedAccessor = <-p.currentReceivedAccessorChan:
 			kaStopErr := p.stopReceiving()
@@ -393,6 +393,8 @@ func (p *processor) wait(f fsm.FSM) error {
 		return nil
 
 	default:
+		p.logger.Debugf("Received an unknown request: %d", p.cfg.Buffer[0])
+
 		return ErrProcessorWaitUnknownRespondReceived
 	}
 }

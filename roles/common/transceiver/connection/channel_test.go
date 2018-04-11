@@ -30,10 +30,53 @@ import (
 	"time"
 
 	"github.com/reinit/coward/common/fsm"
+	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/common/ticker"
 	ch "github.com/reinit/coward/roles/common/channel"
 	"github.com/reinit/coward/roles/common/network"
 )
+
+type dummyChannelCoder struct{}
+
+type dummyChannelCoderEncoder struct {
+	w io.Writer
+}
+
+type dummyChannelCoderDecoder struct {
+	r io.Reader
+}
+
+func (d dummyChannelCoder) Encode(w io.Writer) rw.WriteWriteAll {
+	return dummyChannelCoderEncoder{w: w}
+}
+
+func (d dummyChannelCoder) Decode(r io.Reader) io.Reader {
+	return dummyChannelCoderDecoder{r: r}
+}
+
+func (d dummyChannelCoderDecoder) Read(b []byte) (int, error) {
+	return d.r.Read(b)
+}
+
+func (d dummyChannelCoderEncoder) Write(b []byte) (int, error) {
+	return d.WriteAll(b)
+}
+
+func (d dummyChannelCoderEncoder) WriteAll(b ...[]byte) (int, error) {
+	totalWrite := 0
+
+	for bb := range b {
+		wLen, wErr := d.w.Write(b[bb])
+
+		totalWrite += wLen
+
+		if wErr != nil {
+			return totalWrite, wErr
+		}
+	}
+
+	return totalWrite, nil
+}
 
 type dummyConnectionWriter struct {
 	network.Connection
@@ -67,6 +110,22 @@ func (d *dummyConnection) Read(b []byte) (int, error) {
 
 func (d *dummyConnection) Write(b []byte) (int, error) {
 	return d.buf.Write(b)
+}
+
+func (d *dummyConnection) WriteAll(b ...[]byte) (int, error) {
+	totalWrite := 0
+
+	for i := range b {
+		wLen, wErr := d.Write(b[i])
+
+		totalWrite += wLen
+
+		if wErr != nil {
+			return totalWrite, wErr
+		}
+	}
+
+	return totalWrite, nil
 }
 
 func (d *dummyConnection) SetReadDeadline(t time.Time) error {
@@ -136,7 +195,7 @@ func TestChannelReadWrite(t *testing.T) {
 
 	defer requestWaitTicker.Close()
 
-	v := Channelize(d, requestWaitTicker)
+	v := Channelize(d, dummyChannelCoder{}, requestWaitTicker)
 	v.Timeout(10 * time.Second)
 
 	defer v.Shutdown()
@@ -223,6 +282,8 @@ type dummyConnection2 struct {
 	bufferedReadData []byte
 	readChan         chan []byte
 	writeToBuf       *bytes.Buffer
+	closed           bool
+	closedLock       sync.Mutex
 }
 
 func (d *dummyConnection2) Closed() <-chan struct{} {
@@ -265,6 +326,22 @@ func (d *dummyConnection2) Write(b []byte) (int, error) {
 	return d.writeToBuf.Write(b)
 }
 
+func (d *dummyConnection2) WriteAll(b ...[]byte) (int, error) {
+	totalWrite := 0
+
+	for i := range b {
+		wLen, wErr := d.Write(b[i])
+
+		totalWrite += wLen
+
+		if wErr != nil {
+			return totalWrite, wErr
+		}
+	}
+
+	return totalWrite, nil
+}
+
 func (d *dummyConnection2) SetReadDeadline(t time.Time) error {
 	return nil
 }
@@ -272,7 +349,16 @@ func (d *dummyConnection2) SetReadDeadline(t time.Time) error {
 func (d *dummyConnection2) SetTimeout(t time.Duration) {}
 
 func (d *dummyConnection2) Close() error {
+	d.closedLock.Lock()
+	defer d.closedLock.Unlock()
+
+	if d.closed {
+		return nil
+	}
+
 	close(d.readChan)
+
+	d.closed = true
 
 	return nil
 }
@@ -332,6 +418,8 @@ func TestChannelDispatchMultipleChannels(t *testing.T) {
 		bufferedReadData: make([]byte, 0, 1024),
 		readChan:         r,
 		writeToBuf:       bytes.NewBuffer(make([]byte, 0, 1024)),
+		closed:           false,
+		closedLock:       sync.Mutex{},
 	}
 
 	requestWaitTicker, requestWaitErr := ticker.New(
@@ -345,7 +433,7 @@ func TestChannelDispatchMultipleChannels(t *testing.T) {
 
 	defer requestWaitTicker.Close()
 
-	v := Channelize(d, requestWaitTicker)
+	v := Channelize(d, dummyChannelCoder{}, requestWaitTicker)
 	v.Timeout(10 * time.Second)
 
 	defer v.Shutdown()
@@ -477,9 +565,8 @@ func TestChannelDispatchMultipleChannels(t *testing.T) {
 func BenchmarkChannelWrite(b *testing.B) {
 	ww := dummyConnectionWriter{}
 	vc := channel{
-		Connection:  ww,
-		writeBuffer: &channelWriteBuf{},
-		writeLock:   &sync.Mutex{},
+		Connection: ww,
+		writeLock:  &sync.Mutex{},
 	}
 	data := bytes.Repeat([]byte{0}, 4096)
 
@@ -520,6 +607,10 @@ func (c *dummyBenchmarkConnection) Read(b []byte) (int, error) {
 	return copy(b, c.preDefinedReadData), nil
 }
 
+func (c *dummyBenchmarkConnection) WriteAll(b ...[]byte) (int, error) {
+	return 0, nil
+}
+
 func BenchmarkChannelDispatchRead(b *testing.B) {
 	testData := bytes.Repeat([]byte{0}, 4096)
 
@@ -528,7 +619,7 @@ func BenchmarkChannelDispatchRead(b *testing.B) {
 	d := &dummyBenchmarkConnection{
 		preDefinedReadData: testData,
 	}
-	v := Channelize(d, nil)
+	v := Channelize(d, dummyChannelCoder{}, nil)
 	v.Timeout(10 * time.Second)
 	defer v.Shutdown()
 

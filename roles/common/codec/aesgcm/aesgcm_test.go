@@ -63,7 +63,7 @@ func TestAESCFB(t *testing.T) {
 
 	buf := bytes.NewBuffer(make([]byte, 0, 512))
 
-	codec, codecErr := AESGCM(buf, k, 32, dummyMark{}, &sync.Mutex{})
+	codec, codecErr := AESGCM(k, 32, dummyMark{}, &sync.Mutex{})
 
 	if codecErr != nil {
 		t.Error("Failed to initialize codec:", codecErr)
@@ -81,7 +81,7 @@ func TestAESCFB(t *testing.T) {
 		return
 	}
 
-	wLen, wErr := codec.Write(testData)
+	wLen, wErr := codec.Encode(buf).Write(testData)
 
 	if wErr != nil {
 		t.Error("Failed to write data:", wErr)
@@ -98,7 +98,7 @@ func TestAESCFB(t *testing.T) {
 
 	resultData := make([]byte, len(testData))
 
-	rLen, rErr := io.ReadFull(codec, resultData)
+	rLen, rErr := io.ReadFull(codec.Decode(buf), resultData)
 
 	if rErr != nil {
 		t.Error("Failed to read data:", rErr)
@@ -125,15 +125,15 @@ func TestAESCFBNonceIncreament(t *testing.T) {
 	a := aesgcm{}
 	nonce := [nonceSize]byte{}
 
-	for i := 0; i < 999999998; i++ {
+	for i := 0; i < 999; i++ {
 		a.nonceIncreament(nonce[:])
 	}
 
 	if !bytes.Equal(
-		[]byte{254, 201, 154, 59, 0, 0, 0, 0, 0, 0, 0, 0}, nonce[:]) {
-		t.Error("nonceIncreament has failed. Expected increamented "+
+		[]byte{231, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, nonce[:]) {
+		t.Errorf("nonceIncreament has failed. Expected increamented "+
 			"result would be %d, got %d", []byte{
-			254, 201, 154, 59, 0, 0, 0, 0, 0, 0, 0, 0}, nonce[:])
+			231, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, nonce[:])
 
 		return
 	}

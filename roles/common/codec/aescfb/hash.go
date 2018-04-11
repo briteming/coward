@@ -18,47 +18,25 @@
 //  along with Crypto-Obscured Forwarder. If not, see
 //  <http://www.gnu.org/licenses/>.
 
-package main
+package aescfb
 
 import (
-	"os"
-
-	"github.com/reinit/coward/application"
-	"github.com/reinit/coward/roles/common/codec"
-	"github.com/reinit/coward/roles/mapper"
-	"github.com/reinit/coward/roles/project"
-	"github.com/reinit/coward/roles/projector"
-	"github.com/reinit/coward/roles/proxy"
-	"github.com/reinit/coward/roles/socks5"
+	"hash"
+	"io"
 )
 
-func main() {
-	var execErr error
+type hashWriter struct {
+	io.Writer
 
-	app := application.New(nil, application.Config{
-		Banner:    "",
-		Name:      "",
-		Version:   "",
-		Copyright: "",
-		URL:       "",
-		Components: application.Components{
-			proxy.Role, socks5.Role, mapper.Role,
-			projector.Role, project.Role,
-			codec.Plain,
-			codec.AESCFB128, codec.AESCFB256,
-			codec.AESGCM128, codec.AESGCM256,
-		},
-	})
+	hash hash.Hash
+}
 
-	switch len(os.Args) {
-	case 0:
-	case 1:
-		execErr = app.Help()
-	default:
-		execErr = app.ExecuteArgumentInput(os.Args[1:])
+func (h hashWriter) Write(b []byte) (int, error) {
+	wLen, wErr := h.hash.Write(b)
+
+	if wErr != nil {
+		return 0, wErr
 	}
 
-	if execErr != nil {
-		os.Exit(1)
-	}
+	return h.Writer.Write(b[:wLen])
 }

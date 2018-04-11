@@ -65,10 +65,13 @@ func (h *handler) Bootup() (fsm.State, error) {
 	if cmdSelectErr != nil {
 		h.conn.Done()
 
+		h.logger.Debugf("Failed to select Command \"%d\" due to error: %s",
+			cmdIDBuf[0], cmdSelectErr)
+
 		return nil, cmdSelectErr
 	}
 
-	cmdRunner := fsm.New(cmd.New(h.conn))
+	cmdRunner := fsm.New(cmd.New(h.conn, h.logger))
 
 	// Notice the Bootup will continue reading the segment rather than
 	// request other one. So don't clear the h.conn before Bootup is called.
@@ -78,10 +81,6 @@ func (h *handler) Bootup() (fsm.State, error) {
 
 	if bootupErr != nil {
 		return nil, bootupErr
-	}
-
-	if h.runningCmd != nil {
-		h.runningCmd.Shutdown()
 	}
 
 	h.runningCmd = cmdRunner
@@ -98,29 +97,34 @@ func (h *handler) run(f fsm.FSM) error {
 		return tErr
 	}
 
-	if !h.runningCmd.Running() {
-		h.logger.Debugf("Request completed")
-
-		return f.Shutdown()
-	}
-
-	return nil
-}
-
-func (h *handler) Shutdown() error {
-	if !h.runningCmd.Running() {
+	if h.runningCmd.Running() {
 		return nil
 	}
 
-	shutdownErr := h.runningCmd.Shutdown()
+	return f.Shutdown()
+}
 
-	if shutdownErr != nil {
-		return shutdownErr
+func (h *handler) Shutdown() error {
+	if h.runningCmd == nil {
+		return nil
 	}
 
+	runningCmd := h.runningCmd
 	h.runningCmd = nil
 
-	h.logger.Debugf("Request exited")
+	if !runningCmd.Running() {
+		h.logger.Debugf("Request completed")
+	} else {
+		shutdownErr := runningCmd.Shutdown()
+
+		if shutdownErr != nil {
+			h.logger.Debugf("Request exited with error: %s", shutdownErr)
+
+			return shutdownErr
+		}
+
+		h.logger.Debugf("Request exited")
+	}
 
 	return nil
 }

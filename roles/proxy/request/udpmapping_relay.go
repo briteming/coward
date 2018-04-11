@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/network/resolve"
 	"github.com/reinit/coward/roles/common/relay"
 	"github.com/reinit/coward/roles/proxy/common"
@@ -43,7 +44,7 @@ func (u *udpMappingRelay) Initialize(
 	spLocalHost, _, spLocalErr := net.SplitHostPort(u.localAddr.String())
 
 	if spLocalErr != nil {
-		server.Write([]byte{UDPRespondInvalidRequest})
+		rw.WriteFull(server, []byte{UDPRespondInvalidRequest})
 
 		return ErrUDPTransportFailedToGetLocalIP
 	}
@@ -51,7 +52,7 @@ func (u *udpMappingRelay) Initialize(
 	localIP := net.ParseIP(spLocalHost)
 
 	if localIP == nil {
-		server.Write([]byte{UDPRespondInvalidRequest})
+		rw.WriteFull(server, []byte{UDPRespondInvalidRequest})
 
 		return ErrUDPTransportFailedToGetLocalIP
 	}
@@ -61,12 +62,16 @@ func (u *udpMappingRelay) Initialize(
 	return nil
 }
 
+func (u *udpMappingRelay) Abort(l logger.Logger, aborter relay.Aborter) error {
+	return aborter.SendError()
+}
+
 func (u *udpMappingRelay) Client(
 	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
 	resolved, resolveErr := resolve.DNS(u.resolveTimeout).Resolve(u.mapped.Host)
 
 	if resolveErr != nil {
-		server.Write([]byte{UDPRespondMappingHostUnresolved})
+		rw.WriteFull(server, []byte{UDPRespondMappingHostUnresolved})
 
 		return nil, resolveErr
 	}
@@ -82,12 +87,12 @@ func (u *udpMappingRelay) Client(
 	})
 
 	if listenErr != nil {
-		server.Write([]byte{UDPRespondFailedToListen})
+		rw.WriteFull(server, []byte{UDPRespondFailedToListen})
 
 		return nil, listenErr
 	}
 
-	_, wErr := server.Write([]byte{UDPRespondOK})
+	_, wErr := rw.WriteFull(server, []byte{UDPRespondOK})
 
 	if wErr != nil {
 		listener.Close()

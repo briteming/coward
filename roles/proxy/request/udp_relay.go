@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/reinit/coward/common/logger"
+	"github.com/reinit/coward/common/rw"
 	"github.com/reinit/coward/roles/common/network/resolve"
 	"github.com/reinit/coward/roles/common/relay"
 )
@@ -40,7 +41,7 @@ func (u *udpRelay) Initialize(l logger.Logger, server relay.Server) error {
 	spLocalHost, _, spLocalErr := net.SplitHostPort(u.localAddr.String())
 
 	if spLocalErr != nil {
-		server.Write([]byte{UDPRespondInvalidRequest})
+		rw.WriteFull(server, []byte{UDPRespondInvalidRequest})
 
 		return ErrUDPTransportFailedToGetLocalIP
 	}
@@ -48,7 +49,7 @@ func (u *udpRelay) Initialize(l logger.Logger, server relay.Server) error {
 	localIP := net.ParseIP(spLocalHost)
 
 	if localIP == nil {
-		server.Write([]byte{UDPRespondInvalidRequest})
+		rw.WriteFull(server, []byte{UDPRespondInvalidRequest})
 
 		return ErrUDPTransportFailedToGetLocalIP
 	}
@@ -58,12 +59,16 @@ func (u *udpRelay) Initialize(l logger.Logger, server relay.Server) error {
 	return nil
 }
 
+func (u *udpRelay) Abort(l logger.Logger, aborter relay.Aborter) error {
+	return aborter.SendError()
+}
+
 func (u *udpRelay) Client(
 	l logger.Logger, server relay.Server) (io.ReadWriteCloser, error) {
 	listener, listenErr := net.ListenUDP("udp", nil)
 
 	if listenErr != nil {
-		server.Write([]byte{UDPRespondFailedToListen})
+		rw.WriteFull(server, []byte{UDPRespondFailedToListen})
 
 		return nil, listenErr
 	}
@@ -76,7 +81,7 @@ func (u *udpRelay) Client(
 		remoteLock: sync.RWMutex{},
 	}
 
-	_, wErr := server.Write([]byte{UDPRespondOK})
+	_, wErr := rw.WriteFull(server, []byte{UDPRespondOK})
 
 	if wErr != nil {
 		listenerConn.Close()

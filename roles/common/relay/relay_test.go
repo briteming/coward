@@ -123,7 +123,7 @@ func (d *dummyClient1) Close() error {
 	return nil
 }
 
-func (d *dummyClient1) SendSignal(s Signal, e Signal) error {
+func (d *dummyClient1) Goodbye() error {
 	return nil
 }
 
@@ -143,6 +143,10 @@ func (d *dummyClientBuilder1) Client(
 	server Server,
 ) (io.ReadWriteCloser, error) {
 	return d.conn, nil
+}
+
+func (d *dummyClientBuilder1) Abort(log logger.Logger, aborter Aborter) error {
+	return aborter.SendError()
 }
 
 type dummyCountedBufferWrite struct {
@@ -240,7 +244,7 @@ func TestRelayRelay(t *testing.T) {
 		return
 	}
 
-	if !relay1.(*relay).running {
+	if relay1.(*relay).mode == nil {
 		t.Error("Relay 1 has been shutted down unexpectly")
 
 		return
@@ -294,7 +298,7 @@ func TestRelayRelay(t *testing.T) {
 		return
 	}
 
-	relay2Reading <- bytes.NewBuffer([]byte{byte(SignalClose)})
+	relay2Reading <- bytes.NewBuffer([]byte{byte(SignalClosed)})
 	relay2Sends.count <- struct{}{}
 	tickErr = relay2.Tick()
 
@@ -324,7 +328,7 @@ func TestRelayRelay(t *testing.T) {
 		return
 	}
 
-	relay1Reading <- bytes.NewBuffer([]byte{byte(SignalClose)})
+	relay1Reading <- bytes.NewBuffer([]byte{byte(SignalClosed)})
 	tickErr = relay1.Tick()
 
 	if tickErr != nil {
@@ -333,7 +337,7 @@ func TestRelayRelay(t *testing.T) {
 		return
 	}
 
-	if relay1.(*relay).running {
+	if relay1.(*relay).mode != nil {
 		t.Error("Relay 1 must be shutted down now")
 
 		return

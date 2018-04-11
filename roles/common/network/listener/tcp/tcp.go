@@ -92,10 +92,17 @@ func (a acceptor) Accept() (network.Connection, error) {
 		return nil, acceptErr
 	}
 
-	slErr := accepted.SetLinger(0)
+	optErr := accepted.SetLinger(0)
 
-	if slErr != nil {
-		return nil, slErr
+	if optErr != nil {
+		return nil, optErr
+	}
+
+	// Delay data for sending on server, so the TCP can work more efficienly
+	optErr = accepted.SetNoDelay(false)
+
+	if optErr != nil {
+		return nil, optErr
 	}
 
 	return a.connectionWrapper(accepted), nil

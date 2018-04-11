@@ -23,15 +23,17 @@ package aescfb
 import (
 	"crypto/cipher"
 	"io"
+
+	"github.com/reinit/coward/common/rw"
 )
 
-type encrypter struct {
+type encrypterWriter struct {
 	writer io.Writer
 	stream cipher.Stream
 }
 
-func (e encrypter) Write(b []byte) (int, error) {
+func (e encrypterWriter) Write(b []byte) (int, error) {
 	e.stream.XORKeyStream(b, b)
 
-	return e.writer.Write(b)
+	return rw.WriteFull(e.writer, b)
 }

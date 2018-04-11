@@ -106,7 +106,7 @@ func (s *projectile) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 		MaxWorkers: s.cfg.Endpoints.TotalConnections() * 2,
 		MinWorkers: pcommon.AutomaticalMinWorkerCount(
 			s.cfg.Endpoints.TotalConnections()*2, 128),
-		MaxWorkerIdle:     s.cfg.TransceiverIdleTimeout * 10,
+		MaxWorkerIdle:     s.cfg.TransceiverIdleTimeout * 2,
 		JobReceiveTimeout: s.cfg.TransceiverInitialTimeout,
 	}).Serve()
 

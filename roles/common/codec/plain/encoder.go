@@ -18,47 +18,36 @@
 //  along with Crypto-Obscured Forwarder. If not, see
 //  <http://www.gnu.org/licenses/>.
 
-package main
+package plain
 
 import (
-	"os"
+	"io"
 
-	"github.com/reinit/coward/application"
-	"github.com/reinit/coward/roles/common/codec"
-	"github.com/reinit/coward/roles/mapper"
-	"github.com/reinit/coward/roles/project"
-	"github.com/reinit/coward/roles/projector"
-	"github.com/reinit/coward/roles/proxy"
-	"github.com/reinit/coward/roles/socks5"
+	"github.com/reinit/coward/common/rw"
 )
 
-func main() {
-	var execErr error
+type encoder struct {
+	w io.Writer
+}
 
-	app := application.New(nil, application.Config{
-		Banner:    "",
-		Name:      "",
-		Version:   "",
-		Copyright: "",
-		URL:       "",
-		Components: application.Components{
-			proxy.Role, socks5.Role, mapper.Role,
-			projector.Role, project.Role,
-			codec.Plain,
-			codec.AESCFB128, codec.AESCFB256,
-			codec.AESGCM128, codec.AESGCM256,
-		},
-	})
+func (e encoder) Write(b []byte) (int, error) {
+	return e.WriteAll(b)
+}
 
-	switch len(os.Args) {
-	case 0:
-	case 1:
-		execErr = app.Help()
-	default:
-		execErr = app.ExecuteArgumentInput(os.Args[1:])
+func (e encoder) WriteAll(b ...[]byte) (int, error) {
+	totalWriteLen := 0
+
+	for _, s := range b {
+		wLen, wErr := rw.WriteFull(e.w, s)
+
+		totalWriteLen += wLen
+
+		if wErr == nil {
+			continue
+		}
+
+		return totalWriteLen, wErr
 	}
 
-	if execErr != nil {
-		os.Exit(1)
-	}
+	return totalWriteLen, nil
 }

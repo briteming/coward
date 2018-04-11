@@ -135,9 +135,11 @@ func (c *connection) SetDeadline(t time.Time) error {
 }
 
 func (c *connection) Read(b []byte) (int, error) {
-	now := time.Now()
+	var totalReadLen int
+
 	timeoutRetry := false
 	resetTimeout := true
+	toTryAgain := true
 
 	for {
 		if resetTimeout &&
@@ -147,37 +149,45 @@ func (c *connection) Read(b []byte) (int, error) {
 			if !c.readTimeoutSet {
 				c.readTimeoutSet = true
 
-				c.Conn.SetReadDeadline(now.Add(c.readTimeout))
+				c.Conn.SetReadDeadline(time.Now().Add(c.readTimeout))
+
+				toTryAgain = false
 			}
 		}
 
-		rLen, rErr := c.Conn.Read(b)
+		rLen, rErr := c.Conn.Read(b[totalReadLen:])
+
+		totalReadLen += rLen
 
 		c.readTimeoutDisabled = false
 
 		if rErr == nil {
-			return rLen, nil
+			return totalReadLen, nil
 		}
 
 		if !timeoutRetry {
-			return rLen, c.filterErr(rErr)
+			return totalReadLen, c.filterErr(rErr)
 		}
 
 		resetTimeout = false
 		timeoutRetry = false
 
-		if err, ok := rErr.(net.Error); !ok || !err.Timeout() {
-			return rLen, c.filterErr(rErr)
+		if err, ok := rErr.(net.Error); !ok || !err.Timeout() || !toTryAgain {
+			return totalReadLen, c.filterErr(rErr)
 		}
 
-		c.Conn.SetReadDeadline(now.Add(c.readTimeout))
+		c.Conn.SetReadDeadline(time.Now().Add(c.readTimeout))
+
+		toTryAgain = false
 	}
 }
 
 func (c *connection) Write(b []byte) (int, error) {
-	now := time.Now()
+	var totalWriteLen int
+
 	timeoutRetry := false
 	resetTimeout := true
+	toTryAgain := true
 
 	for {
 		if resetTimeout &&
@@ -187,30 +197,36 @@ func (c *connection) Write(b []byte) (int, error) {
 			if !c.writeTimeoutSet {
 				c.writeTimeoutSet = true
 
-				c.Conn.SetWriteDeadline(now.Add(c.writeTimeout))
+				c.Conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
+
+				toTryAgain = false
 			}
 		}
 
-		wLen, wErr := c.Conn.Write(b)
+		wLen, wErr := c.Conn.Write(b[totalWriteLen:])
+
+		totalWriteLen += wLen
 
 		c.writeTimeoutDisabled = false
 
 		if wErr == nil {
-			return wLen, nil
+			return totalWriteLen, nil
 		}
 
 		if !timeoutRetry {
-			return wLen, c.filterErr(wErr)
+			return totalWriteLen, c.filterErr(wErr)
 		}
 
 		resetTimeout = false
 		timeoutRetry = false
 
-		if err, ok := wErr.(net.Error); !ok || !err.Timeout() {
-			return wLen, c.filterErr(wErr)
+		if err, ok := wErr.(net.Error); !ok || !err.Timeout() || !toTryAgain {
+			return totalWriteLen, c.filterErr(wErr)
 		}
 
-		c.Conn.SetWriteDeadline(now.Add(c.writeTimeout))
+		c.Conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
+
+		toTryAgain = false
 	}
 }
 

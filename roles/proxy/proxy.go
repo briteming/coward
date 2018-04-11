@@ -99,7 +99,7 @@ func (s *proxy) Spawn(unspawnNotifier role.UnspawnNotifier) error {
 			s.cfg.ConnectionChannels)) * 2,
 		MinWorkers: common.AutomaticalMinWorkerCount(
 			s.cfg.Capacity*uint32(s.cfg.ConnectionChannels)*2, 128),
-		MaxWorkerIdle:     s.cfg.IdleTimeout * 10,
+		MaxWorkerIdle:     s.cfg.IdleTimeout * 2,
 		JobReceiveTimeout: s.cfg.InitialTimeout,
 	}).Serve()
 

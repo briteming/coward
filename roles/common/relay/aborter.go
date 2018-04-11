@@ -18,60 +18,22 @@
 //  along with Crypto-Obscured Forwarder. If not, see
 //  <http://www.gnu.org/licenses/>.
 
-package aescfb
+package relay
 
-import (
-	"crypto/rand"
-	"io"
+// Aborter represents a Client initialization aborter
+type Aborter interface {
+	Server
 
-	"github.com/reinit/coward/common/rw"
-	"github.com/reinit/coward/roles/common/transceiver"
-)
-
-// Errors
-var (
-	ErrPaddingTooLong = transceiver.NewCodecError(
-		"Padding too long")
-)
-
-const (
-	maxPaddingLength = 32
-)
-
-type padding struct {
-	padBuf [maxPaddingLength]byte
+	SendError() error
 }
 
-func (p *padding) Passthrough(r io.Reader) error {
-	_, rErr := io.ReadFull(r, p.padBuf[:1])
+// aborter implements Aborter
+type aborter struct {
+	server
 
-	if rErr != nil {
-		return rErr
-	}
-
-	if p.padBuf[0] <= 0 {
-		return nil
-	}
-
-	if p.padBuf[0] > maxPaddingLength {
-		return ErrPaddingTooLong
-	}
-
-	_, rErr = io.ReadFull(r, p.padBuf[:p.padBuf[0]])
-
-	if rErr != nil {
-		return rErr
-	}
-
-	return nil
+	relay *relay
 }
 
-func (p *padding) Insert(w io.Writer) error {
-	rand.Read(p.padBuf[:])
-
-	p.padBuf[0] %= maxPaddingLength
-
-	_, wErr := rw.WriteFull(w, p.padBuf[:1+p.padBuf[0]])
-
-	return wErr
+func (a aborter) SendError() error {
+	return a.relay.sendError()
 }

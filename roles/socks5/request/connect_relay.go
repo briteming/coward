@@ -160,13 +160,20 @@ func (c connectRelay) Initialize(l logger.Logger, server relay.Server) error {
 		return ErrConnectInitialRelayFailed
 
 	default:
+		l.Debugf("Server responded with an unknown TCP initial result code: %d",
+			command[0])
+
 		return ErrConnectInitialRespondUnknownError
 	}
 
 	// Send close, let the server knows that we'll go away
-	server.SendSignal(relay.SignalCompleted, relay.SignalClose)
+	server.Goodbye()
 
 	return connectError
+}
+
+func (c connectRelay) Abort(l logger.Logger, aborter relay.Aborter) error {
+	return aborter.Goodbye()
 }
 
 func (c connectRelay) Client(

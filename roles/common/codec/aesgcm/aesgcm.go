@@ -24,7 +24,6 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
 	"io"
 	"sync"
 
@@ -37,7 +36,7 @@ import (
 const (
 	nonceSize           = 12
 	maxDataBlockSize    = 4096
-	maxPaddingBlockSize = 32
+	maxPaddingBlockSize = 16
 )
 
 // Errors
@@ -53,12 +52,12 @@ var (
 )
 
 type aesgcm struct {
-	rw                   io.ReadWriter
 	block                cipher.Block
 	encrypter            cipher.AEAD
 	encrypterInited      bool
 	encrypterNonceBuf    [nonceSize]byte
 	encrypterPaddingBuf  [maxPaddingBlockSize]byte
+	encryptBuf           *bytes.Buffer
 	decrypter            cipher.AEAD
 	decrypterInited      bool
 	decryptBuf           []byte
@@ -71,12 +70,11 @@ type aesgcm struct {
 
 // AESGCM returns a AES-GCM crypter
 func AESGCM(
-	conn io.ReadWriter,
 	kg key.Key,
 	keySize int,
 	mark marker.Marker,
 	markLock *sync.Mutex,
-) (io.ReadWriter, error) {
+) (rw.Codec, error) {
 	keyValue, keyErr := kg.Get(keySize)
 
 	if keyErr != nil {
@@ -104,12 +102,12 @@ func AESGCM(
 	}
 
 	return &aesgcm{
-		rw:                   conn,
 		block:                blockCipher,
 		encrypter:            gcmEncrypter,
 		encrypterInited:      false,
 		encrypterNonceBuf:    [nonceSize]byte{},
 		encrypterPaddingBuf:  [maxPaddingBlockSize]byte{},
+		encryptBuf:           bytes.NewBuffer(nil),
 		decrypter:            gcmDecrypter,
 		decrypterInited:      false,
 		decryptBuf:           nil,
@@ -134,221 +132,26 @@ func (a *aesgcm) nonceIncreament(nonce []byte) {
 	}
 }
 
-func (a *aesgcm) Read(b []byte) (int, error) {
-	if a.decryptReader.Len() > 0 {
-		return a.decryptReader.Read(b)
-	} else if !a.decrypterInited {
-		_, rErr := io.ReadFull(a.rw, a.decryptNonceBuf[:])
-
-		if rErr != nil {
-			return 0, rErr
-		}
-
-		a.decryptMarkerLock.Lock()
-		markErr := a.decryptMarker.Mark(marker.Mark(a.decryptNonceBuf[:]))
-		a.decryptMarkerLock.Unlock()
-
-		if markErr != nil {
-			return 0, markErr
-		}
-
-		a.decrypterInited = true
-	}
-
-	sizeCipherTextReadLen := a.decrypter.Overhead() + 3
+func (a *aesgcm) getDecryptBuf(size int) []byte {
+	sizeCipherTextReadLen := a.decrypter.Overhead() + size
 
 	if len(a.decryptCipherTextBuf) < sizeCipherTextReadLen {
 		a.decryptCipherTextBuf = make([]byte, sizeCipherTextReadLen)
 	}
 
-	_, rErr := io.ReadFull(
-		a.rw, a.decryptCipherTextBuf[:sizeCipherTextReadLen])
-
-	if rErr != nil {
-		return 0, rErr
-	}
-
-	sizeData, sizeDataOpenErr := a.decrypter.Open(
-		nil,
-		a.decryptNonceBuf[:],
-		a.decryptCipherTextBuf[:sizeCipherTextReadLen],
-		nil)
-
-	if sizeDataOpenErr != nil {
-		return 0, transceiver.WrapCodecError(sizeDataOpenErr)
-	}
-
-	if len(sizeData) != 3 {
-		return 0, ErrInvalidSizeDataLength
-	}
-
-	a.nonceIncreament(a.decryptNonceBuf[:])
-
-	size := uint16(0)
-
-	size |= uint16(sizeData[0])
-	size <<= 8
-	size |= uint16(sizeData[1])
-
-	if size > maxDataBlockSize {
-		return 0, ErrDataBlockTooLarge
-	}
-
-	// Got some padding to read?
-	if sizeData[2] > 0 {
-		if sizeData[2] > maxPaddingBlockSize {
-			return 0, ErrPaddingBlockTooLarge
-		}
-
-		paddingReadLen := a.decrypter.Overhead() + int(sizeData[2])
-
-		if len(a.decryptCipherTextBuf) < paddingReadLen {
-			a.decryptCipherTextBuf = make([]byte, paddingReadLen)
-		}
-
-		_, rErr = io.ReadFull(a.rw, a.decryptCipherTextBuf[:paddingReadLen])
-
-		if rErr != nil {
-			return 0, rErr
-		}
-
-		_, paddingOpenErr := a.decrypter.Open(
-			nil,
-			a.decryptNonceBuf[:],
-			a.decryptCipherTextBuf[:paddingReadLen],
-			nil)
-
-		if paddingOpenErr != nil {
-			return 0, paddingOpenErr
-		}
-
-		a.nonceIncreament(a.decryptNonceBuf[:])
-	}
-
-	actualCipherTextReadLen := a.decrypter.Overhead() + int(size)
-
-	if len(a.decryptCipherTextBuf) < actualCipherTextReadLen {
-		a.decryptCipherTextBuf = make([]byte, actualCipherTextReadLen)
-	}
-
-	_, rErr = io.ReadFull(
-		a.rw, a.decryptCipherTextBuf[:actualCipherTextReadLen])
-
-	if rErr != nil {
-		return 0, rErr
-	}
-
-	dataData, dataOpenErr := a.decrypter.Open(
-		nil,
-		a.decryptNonceBuf[:],
-		a.decryptCipherTextBuf[:actualCipherTextReadLen],
-		nil)
-
-	if dataOpenErr != nil {
-		return 0, transceiver.WrapCodecError(dataOpenErr)
-	}
-
-	a.nonceIncreament(a.decryptNonceBuf[:])
-
-	a.decryptReader = bytes.NewReader(dataData)
-
-	return a.decryptReader.Read(b)
+	return a.decryptCipherTextBuf[:sizeCipherTextReadLen]
 }
 
-func (a *aesgcm) Write(b []byte) (int, error) {
-	if !a.encrypterInited {
-		_, rErr := rand.Read(a.encrypterNonceBuf[:])
-
-		if rErr != nil {
-			return 0, rErr
-		}
-
-		_, wErr := rw.WriteFull(a.rw, a.encrypterNonceBuf[:])
-
-		if wErr != nil {
-			return 0, wErr
-		}
-
-		a.encrypterInited = true
+func (a *aesgcm) Encode(w io.Writer) rw.WriteWriteAll {
+	return encrypter{
+		e: a,
+		w: w,
 	}
+}
 
-	bLen := len(b)
-	start := 0
-	sizeBuf := [3]byte{}
-
-	_, paddingSizeReadErr := rand.Read(sizeBuf[2:])
-
-	if paddingSizeReadErr != nil {
-		return 0, paddingSizeReadErr
+func (a *aesgcm) Decode(r io.Reader) io.Reader {
+	return decrypter{
+		e: a,
+		r: r,
 	}
-
-	sizeBuf[2] %= maxPaddingBlockSize
-
-	for start < bLen {
-		end := start + maxDataBlockSize
-
-		if end > bLen {
-			end = bLen
-		}
-
-		writeLen := uint16(end - start)
-		sizeBuf[0] = byte(uint16(writeLen) >> 8)
-		sizeBuf[1] = byte((uint16(writeLen) << 8) >> 8)
-
-		_, wErr := rw.WriteFull(a.rw, a.encrypter.Seal(
-			nil, a.encrypterNonceBuf[:], sizeBuf[:], nil))
-
-		if wErr != nil {
-			return start, wErr
-		}
-
-		a.nonceIncreament(a.encrypterNonceBuf[:])
-
-		// Notice the padding may not apply to the data block at all
-		if sizeBuf[2] > 0 {
-			_, rErr := rand.Read(a.encrypterPaddingBuf[:sizeBuf[2]])
-
-			if rErr != nil {
-				return start, rErr
-			}
-
-			_, wErr = rw.WriteFull(a.rw, a.encrypter.Seal(
-				nil, a.encrypterNonceBuf[:],
-				a.encrypterPaddingBuf[:sizeBuf[2]],
-				nil))
-
-			if wErr != nil {
-				return start, wErr
-			}
-
-			if a.encrypterPaddingBuf[0] > 0 {
-				sizeBuf[2] %= a.encrypterPaddingBuf[0]
-			} else {
-				sizeBuf[2] = 0
-			}
-
-			a.nonceIncreament(a.encrypterNonceBuf[:])
-		} else {
-			_, paddingSizeReadErr := rand.Read(sizeBuf[2:])
-
-			if paddingSizeReadErr != nil {
-				return 0, paddingSizeReadErr
-			}
-
-			sizeBuf[2] %= maxPaddingBlockSize
-		}
-
-		_, wErr = rw.WriteFull(a.rw, a.encrypter.Seal(
-			nil, a.encrypterNonceBuf[:], b[start:end], nil))
-
-		if wErr != nil {
-			return start, wErr
-		}
-
-		start = end
-
-		a.nonceIncreament(a.encrypterNonceBuf[:])
-	}
-
-	return start, nil
 }

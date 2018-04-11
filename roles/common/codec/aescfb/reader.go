@@ -25,12 +25,12 @@ import (
 	"io"
 )
 
-type decrypter struct {
+type decrypterReader struct {
 	reader io.Reader
 	stream cipher.Stream
 }
 
-func (d decrypter) Read(b []byte) (int, error) {
+func (d decrypterReader) Read(b []byte) (int, error) {
 	rLen, rErr := d.reader.Read(b)
 
 	if rLen > 0 {

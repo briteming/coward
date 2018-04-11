@@ -24,14 +24,30 @@ import (
 	"bytes"
 	"io"
 	"testing"
+
+	"github.com/reinit/coward/common/rw"
 )
 
-type dummyCodec struct {
-	io.ReadWriter
+type dummyCoder struct{}
+
+type dummyCodecEncoder struct {
+	w io.Writer
 }
 
-func (d dummyCodec) Read(b []byte) (int, error) {
-	rLen, rErr := d.ReadWriter.Read(b)
+type dummyCodecDecoder struct {
+	r io.Reader
+}
+
+func (d dummyCoder) Encode(w io.Writer) rw.WriteWriteAll {
+	return dummyCodecEncoder{w: w}
+}
+
+func (d dummyCoder) Decode(r io.Reader) io.Reader {
+	return dummyCodecDecoder{r: r}
+}
+
+func (d dummyCodecDecoder) Read(b []byte) (int, error) {
+	rLen, rErr := d.r.Read(b)
 
 	if rErr != nil {
 		return rLen, rErr
@@ -44,29 +60,43 @@ func (d dummyCodec) Read(b []byte) (int, error) {
 	return rLen, nil
 }
 
-func (d dummyCodec) Write(b []byte) (int, error) {
+func (d dummyCodecEncoder) Write(b []byte) (int, error) {
 	for v := range b {
 		b[v] ^= 66
 	}
 
-	return d.ReadWriter.Write(b)
+	return d.w.Write(b)
 }
 
-func (d dummyCodec) Commit() error {
-	return nil
+func (d dummyCodecEncoder) WriteAll(b ...[]byte) (int, error) {
+	totalWrite := 0
+
+	for bb := range b {
+		for v := range b[bb] {
+			b[bb][v] ^= 66
+		}
+
+		wLen, wErr := d.w.Write(b[bb])
+
+		totalWrite += wLen
+
+		if wErr != nil {
+			return totalWrite, wErr
+		}
+	}
+
+	return totalWrite, nil
 }
 
 func TestCodec(t *testing.T) {
 	d := &dummyConnection{
 		buf: bytes.NewBuffer(make([]byte, 0, 4096)),
 	}
-	c, _ := Codec(d, func(n io.ReadWriter) (io.ReadWriter, error) {
-		return dummyCodec{
-			ReadWriter: n,
-		}, nil
+	c, _ := Codec(func() (rw.Codec, error) {
+		return dummyCoder{}, nil
 	})
 
-	wLen, wErr := c.Write([]byte("Hello World"))
+	wLen, wErr := c.Encode(d).Write([]byte("Hello World"))
 
 	if wErr != nil {
 		t.Error("Failed to write due to error:", wErr)
@@ -82,7 +112,7 @@ func TestCodec(t *testing.T) {
 
 	buf := [1024]byte{}
 
-	rLen, rErr := c.Read(buf[:])
+	rLen, rErr := c.Decode(d).Read(buf[:])
 
 	if rErr != nil {
 		t.Error("Failed to read due to error:", rErr)

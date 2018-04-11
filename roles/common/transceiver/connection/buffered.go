@@ -18,47 +18,27 @@
 //  along with Crypto-Obscured Forwarder. If not, see
 //  <http://www.gnu.org/licenses/>.
 
-package main
+package connection
 
 import (
-	"os"
+	"bufio"
 
-	"github.com/reinit/coward/application"
-	"github.com/reinit/coward/roles/common/codec"
-	"github.com/reinit/coward/roles/mapper"
-	"github.com/reinit/coward/roles/project"
-	"github.com/reinit/coward/roles/projector"
-	"github.com/reinit/coward/roles/proxy"
-	"github.com/reinit/coward/roles/socks5"
+	"github.com/reinit/coward/roles/common/network"
 )
 
-func main() {
-	var execErr error
+type buffered struct {
+	network.Connection
 
-	app := application.New(nil, application.Config{
-		Banner:    "",
-		Name:      "",
-		Version:   "",
-		Copyright: "",
-		URL:       "",
-		Components: application.Components{
-			proxy.Role, socks5.Role, mapper.Role,
-			projector.Role, project.Role,
-			codec.Plain,
-			codec.AESCFB128, codec.AESCFB256,
-			codec.AESGCM128, codec.AESGCM256,
-		},
-	})
+	reader *bufio.Reader
+}
 
-	switch len(os.Args) {
-	case 0:
-	case 1:
-		execErr = app.Help()
-	default:
-		execErr = app.ExecuteArgumentInput(os.Args[1:])
+func newBuffered(c network.Connection, size int) network.Connection {
+	return buffered{
+		Connection: c,
+		reader:     bufio.NewReaderSize(c, size),
 	}
+}
 
-	if execErr != nil {
-		os.Exit(1)
-	}
+func (f buffered) Read(b []byte) (int, error) {
+	return f.reader.Read(b)
 }
