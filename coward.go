@@ -23,13 +23,13 @@ package main
 import (
 	"os"
 
-	"github.com/reinit/coward/application"
-	"github.com/reinit/coward/roles/common/codec"
-	"github.com/reinit/coward/roles/mapper"
-	"github.com/reinit/coward/roles/project"
-	"github.com/reinit/coward/roles/projector"
-	"github.com/reinit/coward/roles/proxy"
-	"github.com/reinit/coward/roles/socks5"
+	"github.com/briteming/coward/application"
+	"github.com/briteming/coward/roles/common/codec"
+	"github.com/briteming/coward/roles/mapper"
+	"github.com/briteming/coward/roles/project"
+	"github.com/briteming/coward/roles/projector"
+	"github.com/briteming/coward/roles/proxy"
+	"github.com/briteming/coward/roles/socks5"
 )
 
 func main() {
